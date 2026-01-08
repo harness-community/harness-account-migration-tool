@@ -249,7 +249,13 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {}).get('content', [])
+            content = data.get('data', {}).get('content', [])
+            # Extract connector data from the "connector" key in each item
+            connectors = []
+            for item in content:
+                connector = item.get('connector', item)  # Fallback to item itself if no "connector" key
+                connectors.append(connector)
+            return connectors
         else:
             print(f"Failed to list connectors: {response.status_code} - {response.text}")
             return []
