@@ -14,12 +14,14 @@ This Python script migrates resources from one Harness account to another using 
 - Uses Harness "Import from YAML" APIs for reliable migration
 - Supports organization and project-scoped resources
 - Provides detailed migration summary
+- **Dry-run mode**: List and export resources without migrating (no destination account required)
 
 ## Prerequisites
 
 1. Python 3.7 or higher
-2. API keys for both source and destination Harness accounts
-3. Account IDs for both accounts
+2. API key for the source Harness account (required)
+3. Source account ID (required)
+4. API key and account ID for destination account (only required for actual migration, not for dry-run)
 
 ## Installation
 
@@ -45,6 +47,26 @@ The account identifier can be found in the URL when logged into your Harness acc
 - The `ACCOUNT_ID` is the account identifier
 
 ## Usage
+
+### Dry Run Mode (List and Export Only)
+
+Use dry-run mode to see what resources exist in your source account without migrating them. This is useful for:
+- Auditing what resources exist
+- Reviewing YAML configurations before migration
+- Testing API connectivity
+
+```bash
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --source-account-id YOUR_SOURCE_ACCOUNT_ID \
+  --dry-run
+```
+
+In dry-run mode:
+- Resources are listed and exported to YAML files
+- No migration to destination account occurs
+- Destination API key and account ID are not required
+- All output is clearly marked with `[DRY RUN]`
 
 ### Basic Usage (Account-level resources)
 
@@ -102,11 +124,13 @@ python harness_migration.py \
 
 The script will:
 1. Create a `harness_exports/` directory containing all exported YAML files
-2. Display progress for each resource being migrated
+2. Display progress for each resource being processed
 3. Print a summary at the end showing:
-   - Number of successful migrations
-   - Number of failed migrations
+   - Number of successful operations (migrations in normal mode, exports in dry-run mode)
+   - Number of failed operations
    - Number of skipped resources
+
+In dry-run mode, the summary will show "Found/Exported" instead of "Success" to indicate resources were discovered and exported but not migrated.
 
 ## Error Handling
 

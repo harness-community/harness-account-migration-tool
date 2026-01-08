@@ -362,18 +362,21 @@ class HarnessAPIClient:
 class HarnessMigrator:
     """Main migration class"""
     
-    def __init__(self, source_client: HarnessAPIClient, dest_client: HarnessAPIClient,
-                 org_identifier: Optional[str] = None, project_identifier: Optional[str] = None):
+    def __init__(self, source_client: HarnessAPIClient, dest_client: Optional[HarnessAPIClient],
+                 org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                 dry_run: bool = False):
         self.source_client = source_client
         self.dest_client = dest_client
         self.org_identifier = org_identifier
         self.project_identifier = project_identifier
+        self.dry_run = dry_run
         self.export_dir = Path("harness_exports")
         self.export_dir.mkdir(exist_ok=True)
     
     def migrate_connectors(self) -> Dict[str, Any]:
         """Migrate connectors"""
-        print("\n=== Migrating Connectors ===")
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Connectors ===")
         connectors = self.source_client.list_connectors(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
@@ -394,14 +397,19 @@ class HarnessMigrator:
             # Save exported YAML
             export_file = self.export_dir / f"connector_{identifier}.yaml"
             export_file.write_text(yaml_content)
+            print(f"  Exported YAML to {export_file}")
             
-            # Import to destination
-            if self.dest_client.import_connector_yaml(
-                yaml_content, self.org_identifier, self.project_identifier
-            ):
+            # Import to destination (skip in dry-run mode)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would import connector to destination account")
                 results['success'] += 1
             else:
-                results['failed'] += 1
+                if self.dest_client.import_connector_yaml(
+                    yaml_content, self.org_identifier, self.project_identifier
+                ):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
         
@@ -409,7 +417,8 @@ class HarnessMigrator:
     
     def migrate_environments(self) -> Dict[str, Any]:
         """Migrate environments"""
-        print("\n=== Migrating Environments ===")
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Environments ===")
         environments = self.source_client.list_environments(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
@@ -430,14 +439,19 @@ class HarnessMigrator:
             # Save exported YAML
             export_file = self.export_dir / f"environment_{identifier}.yaml"
             export_file.write_text(yaml_content)
+            print(f"  Exported YAML to {export_file}")
             
-            # Import to destination
-            if self.dest_client.import_environment_yaml(
-                yaml_content, self.org_identifier, self.project_identifier
-            ):
+            # Import to destination (skip in dry-run mode)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would import environment to destination account")
                 results['success'] += 1
             else:
-                results['failed'] += 1
+                if self.dest_client.import_environment_yaml(
+                    yaml_content, self.org_identifier, self.project_identifier
+                ):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
         
@@ -445,7 +459,8 @@ class HarnessMigrator:
     
     def migrate_infrastructures(self) -> Dict[str, Any]:
         """Migrate infrastructures"""
-        print("\n=== Migrating Infrastructures ===")
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Infrastructures ===")
         infrastructures = self.source_client.list_infrastructures(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
@@ -467,14 +482,19 @@ class HarnessMigrator:
             # Save exported YAML
             export_file = self.export_dir / f"infrastructure_{identifier}.yaml"
             export_file.write_text(yaml_content)
+            print(f"  Exported YAML to {export_file}")
             
-            # Import to destination
-            if self.dest_client.import_infrastructure_yaml(
-                yaml_content, self.org_identifier, self.project_identifier
-            ):
+            # Import to destination (skip in dry-run mode)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would import infrastructure to destination account")
                 results['success'] += 1
             else:
-                results['failed'] += 1
+                if self.dest_client.import_infrastructure_yaml(
+                    yaml_content, self.org_identifier, self.project_identifier
+                ):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
         
@@ -482,7 +502,8 @@ class HarnessMigrator:
     
     def migrate_services(self) -> Dict[str, Any]:
         """Migrate services"""
-        print("\n=== Migrating Services ===")
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Services ===")
         services = self.source_client.list_services(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
@@ -503,14 +524,19 @@ class HarnessMigrator:
             # Save exported YAML
             export_file = self.export_dir / f"service_{identifier}.yaml"
             export_file.write_text(yaml_content)
+            print(f"  Exported YAML to {export_file}")
             
-            # Import to destination
-            if self.dest_client.import_service_yaml(
-                yaml_content, self.org_identifier, self.project_identifier
-            ):
+            # Import to destination (skip in dry-run mode)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would import service to destination account")
                 results['success'] += 1
             else:
-                results['failed'] += 1
+                if self.dest_client.import_service_yaml(
+                    yaml_content, self.org_identifier, self.project_identifier
+                ):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
         
@@ -518,7 +544,8 @@ class HarnessMigrator:
     
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines"""
-        print("\n=== Migrating Pipelines ===")
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Pipelines ===")
         pipelines = self.source_client.list_pipelines(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
@@ -539,14 +566,19 @@ class HarnessMigrator:
             # Save exported YAML
             export_file = self.export_dir / f"pipeline_{identifier}.yaml"
             export_file.write_text(yaml_content)
+            print(f"  Exported YAML to {export_file}")
             
-            # Import to destination
-            if self.dest_client.import_pipeline_yaml(
-                yaml_content, self.org_identifier, self.project_identifier
-            ):
+            # Import to destination (skip in dry-run mode)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would import pipeline to destination account")
                 results['success'] += 1
             else:
-                results['failed'] += 1
+                if self.dest_client.import_pipeline_yaml(
+                    yaml_content, self.org_identifier, self.project_identifier
+                ):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
         
@@ -582,8 +614,8 @@ def main():
     parser = argparse.ArgumentParser(description='Migrate Harness account resources')
     parser.add_argument('--source-api-key', required=True, help='Source account API key')
     parser.add_argument('--source-account-id', required=True, help='Source account ID')
-    parser.add_argument('--dest-api-key', required=True, help='Destination account API key')
-    parser.add_argument('--dest-account-id', required=True, help='Destination account ID')
+    parser.add_argument('--dest-api-key', help='Destination account API key (not required for dry-run)')
+    parser.add_argument('--dest-account-id', help='Destination account ID (not required for dry-run)')
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
@@ -592,37 +624,56 @@ def main():
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Dry run mode: list and export resources without migrating')
     
     args = parser.parse_args()
     
+    # Validate arguments
+    if not args.dry_run:
+        if not args.dest_api_key:
+            parser.error("--dest-api-key is required when not using --dry-run")
+        if not args.dest_account_id:
+            parser.error("--dest-account-id is required when not using --dry-run")
+    
     # Create API clients
     source_client = HarnessAPIClient(args.source_api_key, args.source_account_id, args.base_url)
-    dest_client = HarnessAPIClient(args.dest_api_key, args.dest_account_id, args.base_url)
+    dest_client = None
+    if not args.dry_run:
+        dest_client = HarnessAPIClient(args.dest_api_key, args.dest_account_id, args.base_url)
     
     # Create migrator
     migrator = HarnessMigrator(
-        source_client, dest_client, args.org_identifier, args.project_identifier
+        source_client, dest_client, args.org_identifier, args.project_identifier, args.dry_run
     )
     
     # Perform migration
-    print("Starting Harness account migration...")
+    mode = "DRY RUN - Listing" if args.dry_run else "Migrating"
+    print(f"Starting Harness account {mode.lower()}...")
     print(f"Source Account: {args.source_account_id}")
-    print(f"Destination Account: {args.dest_account_id}")
+    if not args.dry_run:
+        print(f"Destination Account: {args.dest_account_id}")
     if args.org_identifier:
         print(f"Organization: {args.org_identifier}")
     if args.project_identifier:
         print(f"Project: {args.project_identifier}")
     print(f"Resource Types: {', '.join(args.resource_types)}")
+    if args.dry_run:
+        print("\n[DRY RUN MODE] Resources will be listed and exported but NOT migrated")
     
     results = migrator.migrate_all(args.resource_types)
     
     # Print summary
     print("\n" + "="*50)
-    print("MIGRATION SUMMARY")
+    summary_title = "DRY RUN SUMMARY" if args.dry_run else "MIGRATION SUMMARY"
+    print(summary_title)
     print("="*50)
     for resource_type, result in results.items():
         print(f"\n{resource_type.upper()}:")
-        print(f"  Success: {result['success']}")
+        if args.dry_run:
+            print(f"  Found/Exported: {result['success']}")
+        else:
+            print(f"  Success: {result['success']}")
         print(f"  Failed: {result['failed']}")
         print(f"  Skipped: {result['skipped']}")
     
@@ -630,7 +681,10 @@ def main():
     total_failed = sum(r['failed'] for r in results.values())
     
     print(f"\nTOTAL:")
-    print(f"  Success: {total_success}")
+    if args.dry_run:
+        print(f"  Found/Exported: {total_success}")
+    else:
+        print(f"  Success: {total_success}")
     print(f"  Failed: {total_failed}")
     print(f"\nExported YAML files saved to: {migrator.export_dir.absolute()}")
 
