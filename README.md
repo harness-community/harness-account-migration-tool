@@ -19,9 +19,8 @@ This Python script migrates resources from one Harness account to another using 
 ## Prerequisites
 
 1. Python 3.7 or higher
-2. API key for the source Harness account (required)
-3. Source account ID (required)
-4. API key and account ID for destination account (only required for actual migration, not for dry-run)
+2. API key for the source Harness account (required - account ID is automatically extracted from the API key)
+3. API key for destination account (only required for actual migration, not for dry-run - account ID is automatically extracted)
 
 ## Installation
 
@@ -30,9 +29,7 @@ This Python script migrates resources from one Harness account to another using 
 pip install -r requirements.txt
 ```
 
-## Getting API Keys and Account IDs
-
-### API Keys
+## Getting API Keys
 
 1. Log in to your Harness account
 2. Navigate to your user profile
@@ -40,11 +37,7 @@ pip install -r requirements.txt
 4. Generate a new API key
 5. Save the token securely (it's only shown once)
 
-### Account IDs
-
-The account identifier can be found in the URL when logged into your Harness account:
-- Example: `https://app.harness.io/ng/account/ACCOUNT_ID/settings/overview`
-- The `ACCOUNT_ID` is the account identifier
+**Note**: The account ID is automatically extracted from your API key. Harness API keys contain the account ID in the format: `sat.ACCOUNT_ID.rest.of.key`. You don't need to provide the account ID separately.
 
 ## Usage
 
@@ -58,7 +51,6 @@ Use dry-run mode to see what resources exist in your source account without migr
 ```bash
 python harness_migration.py \
   --source-api-key YOUR_SOURCE_API_KEY \
-  --source-account-id YOUR_SOURCE_ACCOUNT_ID \
   --dry-run
 ```
 
@@ -73,9 +65,7 @@ In dry-run mode:
 ```bash
 python harness_migration.py \
   --source-api-key YOUR_SOURCE_API_KEY \
-  --source-account-id YOUR_SOURCE_ACCOUNT_ID \
-  --dest-api-key YOUR_DEST_API_KEY \
-  --dest-account-id YOUR_DEST_ACCOUNT_ID
+  --dest-api-key YOUR_DEST_API_KEY
 ```
 
 ### Organization-scoped Resources
@@ -83,9 +73,7 @@ python harness_migration.py \
 ```bash
 python harness_migration.py \
   --source-api-key YOUR_SOURCE_API_KEY \
-  --source-account-id YOUR_SOURCE_ACCOUNT_ID \
   --dest-api-key YOUR_DEST_API_KEY \
-  --dest-account-id YOUR_DEST_ACCOUNT_ID \
   --org-identifier YOUR_ORG_ID
 ```
 
@@ -94,9 +82,7 @@ python harness_migration.py \
 ```bash
 python harness_migration.py \
   --source-api-key YOUR_SOURCE_API_KEY \
-  --source-account-id YOUR_SOURCE_ACCOUNT_ID \
   --dest-api-key YOUR_DEST_API_KEY \
-  --dest-account-id YOUR_DEST_ACCOUNT_ID \
   --org-identifier YOUR_ORG_ID \
   --project-identifier YOUR_PROJECT_ID
 ```
@@ -106,9 +92,7 @@ python harness_migration.py \
 ```bash
 python harness_migration.py \
   --source-api-key YOUR_SOURCE_API_KEY \
-  --source-account-id YOUR_SOURCE_ACCOUNT_ID \
   --dest-api-key YOUR_DEST_API_KEY \
-  --dest-account-id YOUR_DEST_ACCOUNT_ID \
   --resource-types connectors services pipelines
 ```
 
