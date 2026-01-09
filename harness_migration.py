@@ -85,23 +85,6 @@ class HarnessAPIClient:
             print(f"Failed to list organizations: {response.status_code} - {response.text}")
             return []
     
-    def get_organization_data(self, org_identifier: str) -> Optional[Dict]:
-        """Get organization data"""
-        endpoint = f"/ng/api/organizations/{org_identifier}"
-        params = {}
-        
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            org_data = data.get('data', {})
-            # Remove null values
-            org_data = remove_none_values(org_data)
-            return org_data
-        else:
-            print(f"Failed to get organization data: {response.status_code} - {response.text}")
-            return None
-    
     def create_organization(self, org_data: Dict, dry_run: bool = False) -> bool:
         """Create organization using the create API"""
         # Remove read-only fields that shouldn't be sent in create request
@@ -556,12 +539,10 @@ class HarnessMigrator:
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
         for org in organizations:
-            org_source = org.get('organization', '')
-            identifier = org_source.get('identifier', '')
-            name = org_source.get('name', identifier)
+            org_data = org.get('organization', '')
+            identifier = org_data.get('identifier', '')
+            name = org_data.get('name', identifier)
             print(f"\nProcessing organization: {name} ({identifier})")
-            
-            org_data = self.source_client.get_organization_data(identifier)
             
             if not org_data:
                 print(f"  Failed to get data for organization {name}")
@@ -569,11 +550,9 @@ class HarnessMigrator:
                 continue
             
             # Save exported data as JSON and YAML for backup
-            json_file = self.export_dir / f"organization_{identifier}.json"
-            json_file.write_text(json.dumps(org_data, indent=2))
             yaml_file = self.export_dir / f"organization_{identifier}.yaml"
             yaml_file.write_text(yaml.dump(org_data, default_flow_style=False, sort_keys=False))
-            print(f"  Exported data to {json_file} and {yaml_file}")
+            print(f"  Exported data to {yaml_file}")
             
             # Create in destination (use dry_run parameter)
             if self.dry_run and self.dest_client is None:
@@ -635,11 +614,9 @@ class HarnessMigrator:
                 continue
             
             # Save exported data as JSON and YAML for backup
-            json_file = self.export_dir / f"project_{identifier}.json"
-            json_file.write_text(json.dumps(project_data, indent=2))
             yaml_file = self.export_dir / f"project_{identifier}.yaml"
             yaml_file.write_text(yaml.dump(project_data, default_flow_style=False, sort_keys=False))
-            print(f"  Exported data to {json_file} and {yaml_file}")
+            print(f"  Exported data to {yaml_file}")
             
             # Create in destination (use dry_run parameter)
             if self.dry_run and self.dest_client is None:
