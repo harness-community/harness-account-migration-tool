@@ -556,8 +556,9 @@ class HarnessMigrator:
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
         for org in organizations:
-            identifier = org.get('identifier', '')
-            name = org.get('name', identifier)
+            org_source = org.get('organization', '')
+            identifier = org_source.get('identifier', '')
+            name = org_source.get('name', identifier)
             print(f"\nProcessing organization: {name} ({identifier})")
             
             org_data = self.source_client.get_organization_data(identifier)
