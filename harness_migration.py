@@ -531,6 +531,32 @@ class HarnessMigrator:
         self.export_dir = Path("harness_exports")
         self.export_dir.mkdir(exist_ok=True)
     
+    def _get_all_scopes(self) -> List[tuple]:
+        """Get all scopes (account, orgs, projects) as (org_identifier, project_identifier) tuples"""
+        scopes = []
+        
+        # Account level (None, None)
+        scopes.append((None, None))
+        
+        # Organization level - get all organizations
+        organizations = self.source_client.list_organizations()
+        for org in organizations:
+            org_data = org.get('organization', org)
+            org_id = org_data.get('identifier', '')
+            if org_id:
+                scopes.append((org_id, None))
+        
+        # Project level - get all projects
+        projects = self.source_client.list_projects()
+        for project in projects:
+            project_data = project.get('project', project)
+            org_id = project_data.get('orgIdentifier', '')
+            project_id = project_data.get('identifier', '')
+            if org_id and project_id:
+                scopes.append((org_id, project_id))
+        
+        return scopes
+    
     def migrate_organizations(self) -> Dict[str, Any]:
         """Migrate organizations"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -629,213 +655,249 @@ class HarnessMigrator:
         return results
     
     def migrate_connectors(self) -> Dict[str, Any]:
-        """Migrate connectors"""
+        """Migrate connectors at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Connectors ===")
-        connectors = self.source_client.list_connectors(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        for connector in connectors:
-            identifier = connector.get('identifier', '')
-            name = connector.get('name', identifier)
-            print(f"\nProcessing connector: {name} ({identifier})")
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing connectors at {scope_label} ---")
             
-            yaml_content = self.source_client.get_connector_yaml(
-                identifier, self.org_identifier, self.project_identifier
-            )
+            connectors = self.source_client.list_connectors(org_id, project_id)
             
-            if not yaml_content:
-                print(f"  Failed to get YAML for connector {name}")
-                results['failed'] += 1
-                continue
-            
-            # Save exported YAML
-            export_file = self.export_dir / f"connector_{identifier}.yaml"
-            export_file.write_text(yaml_content)
-            print(f"  Exported YAML to {export_file}")
-            
-            # Import to destination (skip in dry-run mode)
-            if self.dry_run:
-                print(f"  [DRY RUN] Would import connector to destination account")
-                results['success'] += 1
-            else:
-                if self.dest_client.import_connector_yaml(
-                    yaml_content, self.org_identifier, self.project_identifier
-                ):
+            for connector in connectors:
+                connector_data = connector.get('connector', connector)
+                identifier = connector_data.get('identifier', '')
+                name = connector_data.get('name', identifier)
+                print(f"\nProcessing connector: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_connector_yaml(
+                    identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for connector {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"connector_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Import to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would import connector to destination account")
                     results['success'] += 1
                 else:
-                    results['failed'] += 1
-            
-            time.sleep(0.5)  # Rate limiting
+                    if self.dest_client.import_connector_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
         
         return results
     
     def migrate_environments(self) -> Dict[str, Any]:
-        """Migrate environments"""
+        """Migrate environments at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Environments ===")
-        environments = self.source_client.list_environments(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        for env in environments:
-            identifier = env.get('identifier', '')
-            name = env.get('name', identifier)
-            print(f"\nProcessing environment: {name} ({identifier})")
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing environments at {scope_label} ---")
             
-            yaml_content = self.source_client.get_environment_yaml(
-                identifier, self.org_identifier, self.project_identifier
-            )
+            environments = self.source_client.list_environments(org_id, project_id)
             
-            if not yaml_content:
-                print(f"  Failed to get YAML for environment {name}")
-                results['failed'] += 1
-                continue
-            
-            # Save exported YAML
-            export_file = self.export_dir / f"environment_{identifier}.yaml"
-            export_file.write_text(yaml_content)
-            print(f"  Exported YAML to {export_file}")
-            
-            # Import to destination (skip in dry-run mode)
-            if self.dry_run:
-                print(f"  [DRY RUN] Would import environment to destination account")
-                results['success'] += 1
-            else:
-                if self.dest_client.import_environment_yaml(
-                    yaml_content, self.org_identifier, self.project_identifier
-                ):
+            for env in environments:
+                identifier = env.get('identifier', '')
+                name = env.get('name', identifier)
+                print(f"\nProcessing environment: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_environment_yaml(
+                    identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for environment {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"environment_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Import to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would import environment to destination account")
                     results['success'] += 1
                 else:
-                    results['failed'] += 1
-            
-            time.sleep(0.5)  # Rate limiting
+                    if self.dest_client.import_environment_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
         
         return results
     
     def migrate_infrastructures(self) -> Dict[str, Any]:
-        """Migrate infrastructures"""
+        """Migrate infrastructures at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Infrastructures ===")
-        infrastructures = self.source_client.list_infrastructures(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        for infra in infrastructures:
-            identifier = infra.get('identifier', '')
-            env_identifier = infra.get('envIdentifier', '')
-            name = infra.get('name', identifier)
-            print(f"\nProcessing infrastructure: {name} ({identifier})")
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing infrastructures at {scope_label} ---")
             
-            yaml_content = self.source_client.get_infrastructure_yaml(
-                identifier, env_identifier, self.org_identifier, self.project_identifier
-            )
+            infrastructures = self.source_client.list_infrastructures(org_id, project_id)
             
-            if not yaml_content:
-                print(f"  Failed to get YAML for infrastructure {name}")
-                results['failed'] += 1
-                continue
-            
-            # Save exported YAML
-            export_file = self.export_dir / f"infrastructure_{identifier}.yaml"
-            export_file.write_text(yaml_content)
-            print(f"  Exported YAML to {export_file}")
-            
-            # Import to destination (skip in dry-run mode)
-            if self.dry_run:
-                print(f"  [DRY RUN] Would import infrastructure to destination account")
-                results['success'] += 1
-            else:
-                if self.dest_client.import_infrastructure_yaml(
-                    yaml_content, self.org_identifier, self.project_identifier
-                ):
+            for infra in infrastructures:
+                identifier = infra.get('identifier', '')
+                env_identifier = infra.get('envIdentifier', '')
+                name = infra.get('name', identifier)
+                print(f"\nProcessing infrastructure: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_infrastructure_yaml(
+                    identifier, env_identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for infrastructure {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Import to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would import infrastructure to destination account")
                     results['success'] += 1
                 else:
-                    results['failed'] += 1
-            
-            time.sleep(0.5)  # Rate limiting
+                    if self.dest_client.import_infrastructure_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
         
         return results
     
     def migrate_services(self) -> Dict[str, Any]:
-        """Migrate services"""
+        """Migrate services at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Services ===")
-        services = self.source_client.list_services(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        for service in services:
-            identifier = service.get('identifier', '')
-            name = service.get('name', identifier)
-            print(f"\nProcessing service: {name} ({identifier})")
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing services at {scope_label} ---")
             
-            yaml_content = self.source_client.get_service_yaml(
-                identifier, self.org_identifier, self.project_identifier
-            )
+            services = self.source_client.list_services(org_id, project_id)
             
-            if not yaml_content:
-                print(f"  Failed to get YAML for service {name}")
-                results['failed'] += 1
-                continue
-            
-            # Save exported YAML
-            export_file = self.export_dir / f"service_{identifier}.yaml"
-            export_file.write_text(yaml_content)
-            print(f"  Exported YAML to {export_file}")
-            
-            # Import to destination (skip in dry-run mode)
-            if self.dry_run:
-                print(f"  [DRY RUN] Would import service to destination account")
-                results['success'] += 1
-            else:
-                if self.dest_client.import_service_yaml(
-                    yaml_content, self.org_identifier, self.project_identifier
-                ):
+            for service in services:
+                identifier = service.get('identifier', '')
+                name = service.get('name', identifier)
+                print(f"\nProcessing service: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_service_yaml(
+                    identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for service {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"service_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Import to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would import service to destination account")
                     results['success'] += 1
                 else:
-                    results['failed'] += 1
-            
-            time.sleep(0.5)  # Rate limiting
+                    if self.dest_client.import_service_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
         
         return results
     
     def migrate_pipelines(self) -> Dict[str, Any]:
-        """Migrate pipelines"""
+        """Migrate pipelines at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Pipelines ===")
-        pipelines = self.source_client.list_pipelines(self.org_identifier, self.project_identifier)
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        for pipeline in pipelines:
-            identifier = pipeline.get('identifier', '')
-            name = pipeline.get('name', identifier)
-            print(f"\nProcessing pipeline: {name} ({identifier})")
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing pipelines at {scope_label} ---")
             
-            yaml_content = self.source_client.get_pipeline_yaml(
-                identifier, self.org_identifier, self.project_identifier
-            )
+            pipelines = self.source_client.list_pipelines(org_id, project_id)
             
-            if not yaml_content:
-                print(f"  Failed to get YAML for pipeline {name}")
-                results['failed'] += 1
-                continue
-            
-            # Save exported YAML
-            export_file = self.export_dir / f"pipeline_{identifier}.yaml"
-            export_file.write_text(yaml_content)
-            print(f"  Exported YAML to {export_file}")
-            
-            # Import to destination (skip in dry-run mode)
-            if self.dry_run:
-                print(f"  [DRY RUN] Would import pipeline to destination account")
-                results['success'] += 1
-            else:
-                if self.dest_client.import_pipeline_yaml(
-                    yaml_content, self.org_identifier, self.project_identifier
-                ):
+            for pipeline in pipelines:
+                identifier = pipeline.get('identifier', '')
+                name = pipeline.get('name', identifier)
+                print(f"\nProcessing pipeline: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_pipeline_yaml(
+                    identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for pipeline {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"pipeline_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Import to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would import pipeline to destination account")
                     results['success'] += 1
                 else:
-                    results['failed'] += 1
-            
-            time.sleep(0.5)  # Rate limiting
+                    if self.dest_client.import_pipeline_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
         
         return results
     
