@@ -580,40 +580,28 @@ class HarnessMigrator:
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Projects ===")
         
-        # If org_identifier is specified, only migrate projects in that org
-        # Otherwise, migrate all projects across all organizations
-        if self.org_identifier:
-            projects = self.source_client.list_projects(self.org_identifier)
-            all_projects = projects
-        else:
-            # Get all organizations and then get projects for each
-            organizations = self.source_client.list_organizations()
-            all_projects = []
-            for org in organizations:
-                org_id = org.get('identifier', '')
-                projects = self.source_client.list_projects(org_id)
-                # Add org identifier to each project for reference
-                for project in projects:
-                    project['_org_identifier'] = org_id
-                all_projects.extend(projects)
+        # List all projects across all organizations (API fetches all when no org_identifier is provided)
+        projects = self.source_client.list_projects()
         
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        for project in all_projects:
-            identifier = project.get('identifier', '')
-            name = project.get('name', identifier)
-            # Get org identifier from project or use the one from migrator
-            org_id = project.get('_org_identifier') or project.get('orgIdentifier') or self.org_identifier
+        for project in projects:
+            # Extract project data from the response structure
+            project_data = project.get('project', project)
+            identifier = project_data.get('identifier', '')
+            name = project_data.get('name', identifier)
+            org_id = project_data.get('orgIdentifier', '')
             print(f"\nProcessing project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
-            
-            project_data = self.source_client.get_project_data(identifier, org_id)
             
             if not project_data:
                 print(f"  Failed to get data for project {name}")
                 results['failed'] += 1
                 continue
             
-            # Save exported data as JSON and YAML for backup
+            # Remove null values
+            project_data = remove_none_values(project_data)
+            
+            # Save exported data as YAML for backup
             yaml_file = self.export_dir / f"project_{identifier}.yaml"
             yaml_file.write_text(yaml.dump(project_data, default_flow_style=False, sort_keys=False))
             print(f"  Exported data to {yaml_file}")
