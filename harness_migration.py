@@ -17,6 +17,16 @@ import time
 import argparse
 
 
+def remove_none_values(data: Any) -> Any:
+    """Recursively remove keys with None/null values from dictionaries"""
+    if isinstance(data, dict):
+        return {k: remove_none_values(v) for k, v in data.items() if v is not None}
+    elif isinstance(data, list):
+        return [remove_none_values(item) for item in data if item is not None]
+    else:
+        return data
+
+
 class HarnessAPIClient:
     """Client for interacting with Harness API"""
     
@@ -278,6 +288,8 @@ class HarnessAPIClient:
             # Extract connector from nested structure if present
             if 'connector' in connector_data:
                 connector_data = connector_data['connector']
+            # Remove null/None values recursively
+            connector_data = remove_none_values(connector_data)
             # Ensure the data is wrapped in a connector key for Harness YAML format
             # If the top-level key is already 'connector', use as-is; otherwise wrap it
             if not connector_data or (isinstance(connector_data, dict) and 'connector' not in connector_data):
