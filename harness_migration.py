@@ -274,7 +274,21 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {}).get('yaml', '')
+            connector_data = data.get('data', {})
+            # Extract connector from nested structure if present
+            if 'connector' in connector_data:
+                connector_data = connector_data['connector']
+            # Ensure the data is wrapped in a connector key for Harness YAML format
+            # If the top-level key is already 'connector', use as-is; otherwise wrap it
+            if not connector_data or (isinstance(connector_data, dict) and 'connector' not in connector_data):
+                connector_data = {'connector': connector_data}
+            # Convert the connector data to YAML
+            try:
+                yaml_content = yaml.dump(connector_data, default_flow_style=False, sort_keys=False)
+                return yaml_content
+            except Exception as e:
+                print(f"Failed to convert connector data to YAML: {e}")
+                return None
         else:
             print(f"Failed to get connector YAML: {response.status_code} - {response.text}")
             return None
