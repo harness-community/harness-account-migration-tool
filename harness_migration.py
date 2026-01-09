@@ -37,12 +37,28 @@ def clean_for_creation(data: Dict) -> Dict:
     return cleaned
 
 
+def extract_account_id_from_api_key(api_key: str) -> str:
+    """Extract account ID from Harness API key format: sat.ACCOUNT_ID.rest.of.key"""
+    try:
+        parts = api_key.split('.')
+        if len(parts) >= 2:
+            return parts[1]
+        else:
+            raise ValueError("Invalid API key format. Expected format: sat.ACCOUNT_ID.rest.of.key")
+    except Exception as e:
+        raise ValueError(f"Failed to extract account ID from API key: {e}")
+
+
 class HarnessAPIClient:
     """Client for interacting with Harness API"""
     
-    def __init__(self, api_key: str, account_id: str, base_url: str = "https://app.harness.io/gateway"):
+    def __init__(self, api_key: str, account_id: Optional[str] = None, base_url: str = "https://app.harness.io/gateway"):
         self.api_key = api_key
-        self.account_id = account_id
+        # Extract account ID from API key if not provided
+        if account_id:
+            self.account_id = account_id
+        else:
+            self.account_id = extract_account_id_from_api_key(api_key)
         self.base_url = base_url
         self.headers = {
             'x-api-key': api_key,
@@ -936,10 +952,8 @@ class HarnessMigrator:
 
 def main():
     parser = argparse.ArgumentParser(description='Migrate Harness account resources')
-    parser.add_argument('--source-api-key', required=True, help='Source account API key')
-    parser.add_argument('--source-account-id', required=True, help='Source account ID')
-    parser.add_argument('--dest-api-key', help='Destination account API key (not required for dry-run)')
-    parser.add_argument('--dest-account-id', help='Destination account ID (not required for dry-run)')
+    parser.add_argument('--source-api-key', required=True, help='Source account API key (account ID will be extracted from key)')
+    parser.add_argument('--dest-api-key', help='Destination account API key (not required for dry-run, account ID will be extracted from key)')
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
@@ -953,18 +967,26 @@ def main():
     
     args = parser.parse_args()
     
-    # Validate arguments
+    # Extract account IDs from API keys
+    try:
+        source_account_id = extract_account_id_from_api_key(args.source_api_key)
+    except ValueError as e:
+        parser.error(f"Invalid source API key: {e}")
+    
+    dest_account_id = None
     if not args.dry_run:
         if not args.dest_api_key:
             parser.error("--dest-api-key is required when not using --dry-run")
-        if not args.dest_account_id:
-            parser.error("--dest-account-id is required when not using --dry-run")
+        try:
+            dest_account_id = extract_account_id_from_api_key(args.dest_api_key)
+        except ValueError as e:
+            parser.error(f"Invalid destination API key: {e}")
     
-    # Create API clients
-    source_client = HarnessAPIClient(args.source_api_key, args.source_account_id, args.base_url)
+    # Create API clients (account ID will be extracted from API key if not provided)
+    source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url)
     dest_client = None
     if not args.dry_run:
-        dest_client = HarnessAPIClient(args.dest_api_key, args.dest_account_id, args.base_url)
+        dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url)
     
     # Create migrator
     migrator = HarnessMigrator(
@@ -974,9 +996,9 @@ def main():
     # Perform migration
     mode = "DRY RUN - Listing" if args.dry_run else "Migrating"
     print(f"Starting Harness account {mode.lower()}...")
-    print(f"Source Account: {args.source_account_id}")
+    print(f"Source Account: {source_account_id}")
     if not args.dry_run:
-        print(f"Destination Account: {args.dest_account_id}")
+        print(f"Destination Account: {dest_account_id}")
     if args.org_identifier:
         print(f"Organization: {args.org_identifier}")
     if args.project_identifier:
