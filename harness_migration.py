@@ -27,6 +27,16 @@ def remove_none_values(data: Any) -> Any:
         return data
 
 
+def clean_for_creation(data: Dict) -> Dict:
+    """Remove read-only fields that shouldn't be sent in create requests"""
+    read_only_fields = {
+        'createdAt', 'lastModifiedAt', 'lastModifiedBy', 'createdBy',
+        'version', 'harnessManaged', 'deleted', 'accountId'
+    }
+    cleaned = {k: v for k, v in data.items() if k not in read_only_fields}
+    return cleaned
+
+
 class HarnessAPIClient:
     """Client for interacting with Harness API"""
     
@@ -60,6 +70,139 @@ class HarnessAPIClient:
         except requests.exceptions.RequestException as e:
             print(f"Request error: {e}")
             raise
+    
+    def list_organizations(self) -> List[Dict]:
+        """List all organizations"""
+        endpoint = "/ng/api/organizations"
+        params = {}
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('data', {}).get('content', [])
+        else:
+            print(f"Failed to list organizations: {response.status_code} - {response.text}")
+            return []
+    
+    def get_organization_data(self, org_identifier: str) -> Optional[Dict]:
+        """Get organization data"""
+        endpoint = f"/ng/api/organizations/{org_identifier}"
+        params = {}
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            org_data = data.get('data', {})
+            # Remove null values
+            org_data = remove_none_values(org_data)
+            return org_data
+        else:
+            print(f"Failed to get organization data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_organization(self, org_data: Dict, dry_run: bool = False) -> bool:
+        """Create organization using the create API"""
+        # Remove read-only fields that shouldn't be sent in create request
+        cleaned_data = clean_for_creation(org_data)
+        
+        # Prepare the request body according to the API spec
+        # The API expects: { "organization": { "identifier": "...", "name": "...", ... } }
+        request_body = {
+            'organization': cleaned_data
+        }
+        
+        if dry_run:
+            org_name = cleaned_data.get('name', cleaned_data.get('identifier', 'Unknown'))
+            org_id = cleaned_data.get('identifier', 'Unknown')
+            print(f"  [DRY RUN] Would create organization: {org_name} ({org_id})")
+            print(f"  [DRY RUN] Organization data: {json.dumps(cleaned_data, indent=2)}")
+            return True
+        
+        endpoint = "/ng/api/organizations"
+        params = {}
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created organization")
+            return True
+        else:
+            print(f"Failed to create organization: {response.status_code} - {response.text}")
+            return False
+    
+    def list_projects(self, org_identifier: Optional[str] = None) -> List[Dict]:
+        """List all projects"""
+        endpoint = "/ng/api/projects"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('data', {}).get('content', [])
+        else:
+            print(f"Failed to list projects: {response.status_code} - {response.text}")
+            return []
+    
+    def get_project_data(self, project_identifier: str, org_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get project data"""
+        endpoint = f"/ng/api/projects/{project_identifier}"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            project_data = data.get('data', {}).get('project', data.get('data', {}))
+            # Remove null values
+            project_data = remove_none_values(project_data)
+            return project_data
+        else:
+            print(f"Failed to get project data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_project(self, project_data: Dict, org_identifier: Optional[str] = None, dry_run: bool = False) -> bool:
+        """Create project using the create API"""
+        # Ensure orgIdentifier is set in project data
+        if org_identifier and 'orgIdentifier' not in project_data:
+            project_data['orgIdentifier'] = org_identifier
+        
+        # Remove read-only fields that shouldn't be sent in create request
+        cleaned_data = clean_for_creation(project_data)
+        
+        # Prepare the request body according to the API spec
+        # The API expects: { "project": { "orgIdentifier": "...", "identifier": "...", "name": "...", ... } }
+        request_body = {
+            'project': cleaned_data
+        }
+        
+        if dry_run:
+            project_name = cleaned_data.get('name', cleaned_data.get('identifier', 'Unknown'))
+            project_id = cleaned_data.get('identifier', 'Unknown')
+            org_id = cleaned_data.get('orgIdentifier', org_identifier or 'Unknown')
+            print(f"  [DRY RUN] Would create project: {project_name} ({project_id}) in org {org_id}")
+            print(f"  [DRY RUN] Project data: {json.dumps(cleaned_data, indent=2)}")
+            return True
+        
+        endpoint = "/ng/api/projects"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created project")
+            return True
+        else:
+            print(f"Failed to create project: {response.status_code} - {response.text}")
+            return False
     
     def list_pipelines(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all pipelines"""
@@ -405,6 +548,120 @@ class HarnessMigrator:
         self.export_dir = Path("harness_exports")
         self.export_dir.mkdir(exist_ok=True)
     
+    def migrate_organizations(self) -> Dict[str, Any]:
+        """Migrate organizations"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Organizations ===")
+        organizations = self.source_client.list_organizations()
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        for org in organizations:
+            identifier = org.get('identifier', '')
+            name = org.get('name', identifier)
+            print(f"\nProcessing organization: {name} ({identifier})")
+            
+            org_data = self.source_client.get_organization_data(identifier)
+            
+            if not org_data:
+                print(f"  Failed to get data for organization {name}")
+                results['failed'] += 1
+                continue
+            
+            # Save exported data as JSON and YAML for backup
+            json_file = self.export_dir / f"organization_{identifier}.json"
+            json_file.write_text(json.dumps(org_data, indent=2))
+            yaml_file = self.export_dir / f"organization_{identifier}.yaml"
+            yaml_file.write_text(yaml.dump(org_data, default_flow_style=False, sort_keys=False))
+            print(f"  Exported data to {json_file} and {yaml_file}")
+            
+            # Create in destination (use dry_run parameter)
+            if self.dry_run and self.dest_client is None:
+                # In dry run mode without dest client, just show what would be created
+                cleaned_data = clean_for_creation(org_data)
+                org_name = cleaned_data.get('name', cleaned_data.get('identifier', 'Unknown'))
+                org_id = cleaned_data.get('identifier', 'Unknown')
+                print(f"  [DRY RUN] Would create organization: {org_name} ({org_id})")
+                results['success'] += 1
+            elif self.dest_client:
+                if self.dest_client.create_organization(org_data, dry_run=self.dry_run):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
+            else:
+                print(f"  Error: No destination client available")
+                results['failed'] += 1
+            
+            time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_projects(self) -> Dict[str, Any]:
+        """Migrate projects"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Projects ===")
+        
+        # If org_identifier is specified, only migrate projects in that org
+        # Otherwise, migrate all projects across all organizations
+        if self.org_identifier:
+            projects = self.source_client.list_projects(self.org_identifier)
+            all_projects = projects
+        else:
+            # Get all organizations and then get projects for each
+            organizations = self.source_client.list_organizations()
+            all_projects = []
+            for org in organizations:
+                org_id = org.get('identifier', '')
+                projects = self.source_client.list_projects(org_id)
+                # Add org identifier to each project for reference
+                for project in projects:
+                    project['_org_identifier'] = org_id
+                all_projects.extend(projects)
+        
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        for project in all_projects:
+            identifier = project.get('identifier', '')
+            name = project.get('name', identifier)
+            # Get org identifier from project or use the one from migrator
+            org_id = project.get('_org_identifier') or project.get('orgIdentifier') or self.org_identifier
+            print(f"\nProcessing project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
+            
+            project_data = self.source_client.get_project_data(identifier, org_id)
+            
+            if not project_data:
+                print(f"  Failed to get data for project {name}")
+                results['failed'] += 1
+                continue
+            
+            # Save exported data as JSON and YAML for backup
+            json_file = self.export_dir / f"project_{identifier}.json"
+            json_file.write_text(json.dumps(project_data, indent=2))
+            yaml_file = self.export_dir / f"project_{identifier}.yaml"
+            yaml_file.write_text(yaml.dump(project_data, default_flow_style=False, sort_keys=False))
+            print(f"  Exported data to {json_file} and {yaml_file}")
+            
+            # Create in destination (use dry_run parameter)
+            if self.dry_run and self.dest_client is None:
+                # In dry run mode without dest client, just show what would be created
+                cleaned_data = clean_for_creation(project_data)
+                project_name = cleaned_data.get('name', cleaned_data.get('identifier', 'Unknown'))
+                project_id = cleaned_data.get('identifier', 'Unknown')
+                org_id_display = cleaned_data.get('orgIdentifier', org_id or 'Unknown')
+                print(f"  [DRY RUN] Would create project: {project_name} ({project_id}) in org {org_id_display}")
+                results['success'] += 1
+            elif self.dest_client:
+                if self.dest_client.create_project(project_data, org_id, dry_run=self.dry_run):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
+            else:
+                print(f"  Error: No destination client available")
+                results['failed'] += 1
+            
+            time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_connectors(self) -> Dict[str, Any]:
         """Migrate connectors"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -619,11 +876,18 @@ class HarnessMigrator:
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
-            resource_types = ['connectors', 'environments', 'infrastructures', 'services', 'pipelines']
+            resource_types = ['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines']
         
         all_results = {}
         
-        # Migrate in dependency order
+        # Migrate in dependency order - organizations and projects first
+        if 'organizations' in resource_types:
+            all_results['organizations'] = self.migrate_organizations()
+        
+        if 'projects' in resource_types:
+            all_results['projects'] = self.migrate_projects()
+        
+        # Then migrate other resources
         if 'connectors' in resource_types:
             all_results['connectors'] = self.migrate_connectors()
         
@@ -651,8 +915,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['connectors', 'environments', 'infrastructures', 'services', 'pipelines'],
-                       default=['connectors', 'environments', 'infrastructures', 'services', 'pipelines'],
+                       choices=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines'],
+                       default=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
