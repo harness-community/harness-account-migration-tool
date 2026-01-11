@@ -64,21 +64,33 @@ This is a Python-based tool for migrating Harness account resources from one Har
 - **Data Extraction**: Data is extracted directly from list responses
 - **Read-only Field Removal**: Automatically removes fields like `createdAt`, `lastModifiedAt`, etc.
 
-### Other Resources (Connectors, Environments, Infrastructures, Services, Pipelines)
+### Connectors
+- **Storage Method**: Always Inline (not stored in GitX)
+- **Migration Approach**: Create API with YAML content directly in request body
+- **API Endpoint**: `POST /ng/api/connectors` with YAML content
+- **Content-Type**: `text/yaml` header
+- **Data Extraction**: Extract from `connector` key in list response
+- **Note**: Connectors use create API, not import API
+
+### Other Resources (Environments, Infrastructures, Services, Pipelines)
 - **Storage Method**: Can be GitX or Inline (varies by resource and account configuration)
-- **Current Implementation**: Assumes GitX and uses "Import from YAML" APIs
-- **Future Enhancement Needed**: Detect storage method and use appropriate API
-  - **GitX Resources**: Use "Import from YAML" APIs (current approach)
-  - **Inline Resources**: Should use Create API endpoints (not yet implemented)
-- **Export Format**: Resources are exported as YAML files (for GitX) or JSON files (for Inline)
-- **Import Process for GitX**: 
-  1. Get resource YAML from source account
-  2. Export to file for backup
-  3. Import to destination using YAML import API
-- **Import Process for Inline** (to be implemented):
+- **Automatic Detection**: The script detects storage method using `is_gitx_resource()` method
+- **Detection Logic**:
+  - Checks `storeType` field (REMOTE = GitX, INLINE = Inline)
+  - Checks for `gitDetails` field
+  - Checks for git-related fields (`repo`, `branch`)
+  - Defaults to Inline if no indicators found
+- **Export Format**: Resources are exported as YAML files (for both GitX and Inline)
+- **Import Process for Inline Resources**: 
   1. Get resource data from source account
-  2. Clean read-only fields
-  3. Create in destination using Create API
+  2. Extract YAML content from resource data
+  3. Export YAML to file for backup
+  4. Import to destination using YAML import API with YAML content
+- **Import Process for GitX Resources**:
+  1. Get resource data from source account
+  2. Extract git details (`gitDetails`) from resource data
+  3. Export YAML to file for backup (if available)
+  4. Import to destination using YAML import API with git details
 
 ## Scope Handling
 
@@ -118,6 +130,8 @@ Resources are migrated in dependency order:
 5. **Infrastructures** (fifth - depend on environments)
 6. **Services** (sixth - may reference connectors and environments)
 7. **Pipelines** (last - may reference all other resources)
+
+**Note**: Environments, infrastructures, services, and pipelines automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource.
 
 ## Dry-Run Mode
 
@@ -180,7 +194,8 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
 ### API Request Pattern
 - All requests include `accountIdentifier` in query parameters
 - Authentication via `x-api-key` header
-- Content-Type: `application/json`
+- Content-Type: `application/json` (most endpoints)
+- **Exception**: Connector creation uses `Content-Type: text/yaml` with YAML content in request body
 
 ### Error Handling
 - API errors are caught and logged
@@ -215,64 +230,35 @@ Exported files include scope information:
 ### Connectors
 - `GET /ng/api/connectors` - List connectors
 - `GET /ng/api/connectors/{identifier}` - Get connector
-- `POST /ng/api/connectors/import` - Import connector from YAML
+- `POST /ng/api/connectors` - Create connector (with YAML content in body, `Content-Type: text/yaml`)
 
 ### Environments
 - `GET /ng/api/environmentsV2` - List environments
 - `GET /ng/api/environmentsV2/{identifier}` - Get environment
-- `POST /ng/api/environmentsV2/import` - Import environment from YAML
+- `POST /ng/api/environmentsV2/import` - Import environment (supports YAML content for inline, or git details for GitX)
 
 ### Infrastructures
 - `GET /ng/api/infrastructures` - List infrastructures
 - `GET /ng/api/infrastructures/{identifier}` - Get infrastructure
-- `POST /ng/api/infrastructures/import` - Import infrastructure from YAML
+- `POST /ng/api/infrastructures/import` - Import infrastructure (supports YAML content for inline, or git details for GitX)
 
 ### Services
 - `GET /ng/api/servicesV2` - List services
 - `GET /ng/api/servicesV2/{identifier}` - Get service
-- `POST /ng/api/servicesV2/import` - Import service from YAML
+- `POST /ng/api/servicesV2/import` - Import service (supports YAML content for inline, or git details for GitX)
 
 ### Pipelines
 - `POST /pipeline/api/pipelines/list` - List pipelines
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
-- `POST /pipeline/api/pipelines/import-pipeline` - Import pipeline from YAML
+- `POST /pipeline/api/pipelines/import-pipeline` - Import pipeline (supports YAML content for inline, or git details for GitX)
 
 ## Common Patterns
 
 ### Adding a New Resource Type
 
-**Important**: First determine if the resource uses GitX (YAML) or Inline (data fields) storage.
+**Important**: First determine if the resource uses GitX (YAML) or Inline (data fields) storage. Many resources support both, so you'll need to detect and handle both cases.
 
-#### For GitX (YAML-based) Resources:
-
-1. Add list method to `HarnessAPIClient`:
-   ```python
-   def list_new_resource(self, org_id=None, project_id=None):
-       endpoint = "/ng/api/new-resource"
-       # ... implementation
-   ```
-
-2. Add get YAML method:
-   ```python
-   def get_new_resource_yaml(self, identifier, org_id=None, project_id=None):
-       # ... implementation
-   ```
-
-3. Add import method:
-   ```python
-   def import_new_resource_yaml(self, yaml_content, org_id=None, project_id=None):
-       # ... implementation
-   ```
-
-4. Add migration method to `HarnessMigrator`:
-   ```python
-   def migrate_new_resources(self):
-       scopes = self._get_all_scopes()
-       for org_id, project_id in scopes:
-           # ... iterate and migrate using YAML import
-   ```
-
-#### For Inline (Data-based) Resources:
+#### For Resources That Support Both GitX and Inline:
 
 1. Add list method to `HarnessAPIClient`:
    ```python
@@ -281,59 +267,109 @@ Exported files include scope information:
        # ... implementation
    ```
 
-2. Add get data method:
+2. Add get data method (for detection):
    ```python
    def get_new_resource_data(self, identifier, org_id=None, project_id=None):
-       # ... implementation - returns dict, not YAML
+       endpoint = f"/ng/api/new-resource/{identifier}"
+       # ... implementation - returns full resource data dict
    ```
 
-3. Add create method:
+3. Add get YAML method (wrapper around get_data):
    ```python
-   def create_new_resource(self, resource_data, org_id=None, project_id=None, dry_run=False):
-       # ... implementation - uses Create API, not Import API
+   def get_new_resource_yaml(self, identifier, org_id=None, project_id=None):
+       resource_data = self.get_new_resource_data(identifier, org_id, project_id)
+       if resource_data:
+           return resource_data.get('yaml', '')
+       return None
    ```
 
-4. Add migration method to `HarnessMigrator`:
+4. Add import method (supports both YAML content and git details):
+   ```python
+   def import_new_resource_yaml(self, yaml_content=None, git_details=None, org_id=None, project_id=None):
+       endpoint = "/ng/api/new-resource/import"
+       data = {}
+       if yaml_content:
+           data['yaml'] = yaml_content
+       if git_details:
+           data['gitDetails'] = git_details
+       # ... implementation
+   ```
+
+5. Add migration method to `HarnessMigrator`:
    ```python
    def migrate_new_resources(self):
        scopes = self._get_all_scopes()
        for org_id, project_id in scopes:
-           # ... iterate and migrate using Create API
+           resources = self.source_client.list_new_resource(org_id, project_id)
+           for resource in resources:
+               # Extract from nested key if present (e.g., resource.get('newResource', resource))
+               resource_item = resource.get('newResource', resource)
+               identifier = resource_item.get('identifier', '')
+               
+               # Get full resource data
+               resource_data = self.source_client.get_new_resource_data(identifier, org_id, project_id)
+               
+               # Detect storage type
+               is_gitx = self.source_client.is_gitx_resource(resource_data)
+               
+               if is_gitx:
+                   # GitX: Use git details
+                   git_details = resource_data.get('gitDetails', {})
+                   # Import with git details
+               else:
+                   # Inline: Use YAML content
+                   yaml_content = resource_data.get('yaml', '')
+                   # Import with YAML content
    ```
 
-5. Add to `migrate_all()` and command-line choices
+6. Add to `migrate_all()` and command-line choices
+
+#### Pattern for Extracting Nested Data from List Responses:
+
+When iterating through list responses, extract the actual resource data from nested keys:
+```python
+for item in list_response:
+    # Extract from key matching resource name, fallback to item itself
+    resource_data = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'project'
+    identifier = resource_data.get('identifier', '')
+    name = resource_data.get('name', identifier)
+```
 
 ### Handling Special Cases
 
-- **Connectors**: Extract from `connector` key in list response
-- **Projects**: Extract from `project` key in list response
-- **Organizations**: Extract from `organization` key in list response
-- **Infrastructures**: Require `environmentIdentifier` parameter
+- **Nested Data Extraction**: Many list APIs return resources nested under a key matching the resource name:
+  - **Connectors**: Extract from `connector` key in list response: `connector.get('connector', connector)`
+  - **Projects**: Extract from `project` key in list response: `project.get('project', project)`
+  - **Organizations**: Extract from `organization` key in list response: `org.get('organization', org)`
+  - **Environments**: Extract from `environment` key in list response: `env.get('environment', env)`
+  - Always use fallback to the item itself if the key doesn't exist
+- **Infrastructures**: Require `environmentIdentifier` parameter when getting individual infrastructure data
+- **Pipelines**: YAML field is named `yamlPipeline` instead of `yaml` in the response
 
 ### Detecting GitX vs Inline Storage
 
-**Future Implementation**: To properly support both storage methods, check resource metadata:
+The `is_gitx_resource()` method automatically detects storage method by checking resource metadata:
 
 1. **Check for `storeType` field** in resource response:
-   - `storeType: "REMOTE"` or `storeType: "INLINE"` indicates storage method
-   - `storeType: "REMOTE"` = GitX (use YAML Import API)
-   - `storeType: "INLINE"` = Inline (use Create API)
+   - `storeType: "REMOTE"` = GitX (use git details in import API)
+   - `storeType: "INLINE"` = Inline (use YAML content in import API)
 
-2. **Check for `yaml` field** in resource response:
-   - Presence of `yaml` field suggests GitX resource
-   - Absence suggests Inline resource
+2. **Check for `gitDetails` field**:
+   - Presence of `gitDetails` indicates GitX resource
+   - Used to import from git location
 
-3. **Check for Git-related fields**:
-   - Fields like `gitDetails`, `repo`, `branch` indicate GitX
+3. **Check for git-related fields**:
+   - Fields like `repo`, `branch` indicate GitX
    - Absence suggests Inline
 
-4. **API Response Patterns**:
-   - GitX resources: GET endpoint returns `yaml` field
-   - Inline resources: GET endpoint returns data fields but no `yaml` field
+4. **Check for `yaml` field**:
+   - Both GitX and Inline resources may have YAML content
+   - For Inline: YAML content is used directly in import
+   - For GitX: git details are used, YAML is for export only
 
-**Example Detection Logic** (to be implemented):
+**Current Implementation**:
 ```python
-def is_gitx_resource(resource_data: Dict) -> bool:
+def is_gitx_resource(self, resource_data: Dict) -> bool:
     """Determine if resource is stored in GitX or Inline"""
     # Check storeType field
     if resource_data.get('storeType') == 'REMOTE':
@@ -341,17 +377,25 @@ def is_gitx_resource(resource_data: Dict) -> bool:
     if resource_data.get('storeType') == 'INLINE':
         return False
     
-    # Check for yaml field
-    if 'yaml' in resource_data:
+    # Check for gitDetails field
+    if 'gitDetails' in resource_data and resource_data.get('gitDetails'):
         return True
     
     # Check for git-related fields
-    if 'gitDetails' in resource_data or 'repo' in resource_data:
+    if 'repo' in resource_data or 'branch' in resource_data:
         return True
     
     # Default: assume Inline if no indicators found
     return False
 ```
+
+### Connectors (Special Case)
+
+- **Storage Method**: Always Inline (not stored in GitX)
+- **Migration Approach**: Create API with YAML content directly in request body
+- **API Endpoint**: `POST /ng/api/connectors` with YAML content as request body
+- **Content-Type**: `text/yaml` (not `application/json`)
+- **Note**: Connectors do NOT use the import API, they use the create API with YAML content
 
 ## Testing and Validation
 
@@ -362,24 +406,18 @@ def is_gitx_resource(resource_data: Dict) -> bool:
 
 ## Known Limitations
 
-1. **GitX vs Inline Assumption**: Currently assumes all resources (except orgs/projects) are stored in GitX and uses YAML Import APIs. Inline resources stored directly in Harness database are not yet supported and will fail migration.
-2. **FirstGen Resources**: Only supports NextGen (NG) API endpoints
-3. **Resource Dependencies**: Some resources may have dependencies that need manual verification
-4. **Existing Resources**: Import may fail if resource already exists in destination
-5. **Rate Limiting**: Fixed 0.5s delay may need adjustment for large migrations
-6. **Error Recovery**: Failed resources don't automatically retry
-7. **Storage Method Detection**: Does not currently detect whether a resource is GitX or Inline before attempting migration
+1. **FirstGen Resources**: Only supports NextGen (NG) API endpoints
+2. **Resource Dependencies**: Some resources may have dependencies that need manual verification
+3. **Existing Resources**: Import may fail if resource already exists in destination
+4. **Rate Limiting**: Fixed 0.5s delay may need adjustment for large migrations
+5. **Error Recovery**: Failed resources don't automatically retry
+6. **Git Details Validation**: For GitX resources, assumes git details from source account are valid in destination account (same git repository access)
 
 ## Future Enhancements
 
 ### Planned Improvements
 
-1. **GitX vs Inline Detection**
-   - Detect resource storage method (GitX vs Inline) before migration
-   - Automatically use appropriate API (YAML Import vs Create API)
-   - Handle resources that may be stored differently in source vs destination
-
-2. **Retry Logic**
+1. **Retry Logic**
    - Automatic retry for failed API calls
    - Exponential backoff for rate limiting
    - Configurable retry attempts and delays
@@ -432,25 +470,21 @@ def is_gitx_resource(resource_data: Dict) -> bool:
 - ✅ Multi-scope support (account/org/project)
 - ✅ Dry-run mode
 - ✅ Automatic account ID extraction
-- ⚠️ Currently assumes all resources are GitX (needs enhancement)
+- ✅ Storage method detection (GitX vs Inline)
+- ✅ Support for both inline and GitX resource migration
 
-#### Phase 2: Storage Method Detection (Next Priority)
-- Detect GitX vs Inline storage for each resource
-- Implement Create API methods for Inline resources
-- Support both migration methods based on detection
-
-#### Phase 3: Reliability Improvements
+#### Phase 2: Reliability Improvements (Next Priority)
 - Retry logic with exponential backoff
 - Progress persistence and resume capability
 - Enhanced error handling and reporting
 
-#### Phase 4: Advanced Features
+#### Phase 3: Advanced Features
 - Dependency graph analysis
 - Parallel migration support
 - Resource validation
 - Advanced filtering options
 
-#### Phase 5: User Experience
+#### Phase 4: User Experience
 - Interactive mode with progress bars
 - Web UI or CLI improvements
 - Migration templates and presets

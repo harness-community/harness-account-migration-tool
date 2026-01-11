@@ -5,13 +5,18 @@ This Python script migrates resources from one Harness account to another using 
 ## Features
 
 - Migrates multiple resource types:
+  - Organizations
+  - Projects
   - Connectors
   - Environments
   - Infrastructures
   - Services
   - Pipelines
+- **Automatic Storage Detection**: Detects whether resources are stored inline or in GitX (Git Experience)
+- **Dual Migration Support**: 
+  - Inline resources: Migrated using YAML content via import APIs
+  - GitX resources: Migrated using git location details via import APIs
 - Exports resources to YAML files for backup
-- Uses Harness "Import from YAML" APIs for reliable migration
 - Supports organization and project-scoped resources
 - Provides detailed migration summary
 - **Dry-run mode**: List and export resources without migrating (no destination account required)
@@ -98,11 +103,13 @@ python harness_migration.py \
 
 ### Available Resource Types
 
+- `organizations` - Organizations (account-level)
+- `projects` - Projects (organization-scoped)
 - `connectors` - Connectors (e.g., Git, Docker, Kubernetes)
-- `environments` - Environments
-- `infrastructures` - Infrastructure definitions
-- `services` - Services
-- `pipelines` - Pipelines
+- `environments` - Environments (supports both inline and GitX storage)
+- `infrastructures` - Infrastructure definitions (supports both inline and GitX storage)
+- `services` - Services (supports both inline and GitX storage)
+- `pipelines` - Pipelines (supports both inline and GitX storage)
 
 ## Output
 
@@ -129,7 +136,10 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (connectors → environments → infrastructures → services → pipelines)
+- Resources are migrated in dependency order (organizations → projects → connectors → environments → infrastructures → services → pipelines)
+- **Storage Type Detection**: The script automatically detects whether resources are stored inline or in GitX and uses the appropriate migration method
+- **Inline Resources**: Resources stored inline are migrated by copying their YAML content and importing it
+- **GitX Resources**: Resources stored in GitX are migrated by using their git location details to import from the git repository
 - If a resource already exists in the destination account, the import may fail. You may need to delete existing resources first or modify the YAML identifiers
 - Some resources may have dependencies on others. Ensure all dependencies are migrated before migrating dependent resources
 - The script uses the Harness NextGen (NG) API endpoints. For FirstGen resources, you may need to modify the endpoints
