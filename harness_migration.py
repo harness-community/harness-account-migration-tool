@@ -276,7 +276,7 @@ class HarnessAPIClient:
         
         # Build JSON payload with YAML content and identifiers
         data = {
-            'yaml': yaml_content,
+            'pipeline_yaml': yaml_content,
             'accountId': self.account_id
         }
         if org_identifier:
