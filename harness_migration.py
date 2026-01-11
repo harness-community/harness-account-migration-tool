@@ -1041,7 +1041,7 @@ class HarnessMigrator:
                 else:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
-                        connector_ref = env_data.get('connectorxRef')
+                        connector_ref = env_data.get('connectorRef')
                         if self.dest_client.import_environment_yaml(
                             git_details=git_details, environment_identifier=identifier,
                             connector_ref=connector_ref,
