@@ -492,8 +492,8 @@ class HarnessAPIClient:
         # Default: assume Inline if no indicators found
         return False
     
-    def create_environment(self, yaml_content: str, org_identifier: Optional[str] = None,
-                          project_identifier: Optional[str] = None) -> bool:
+    def create_environment(self, yaml_content: str, identifier: str, type: str, name: str,
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Create environment from YAML content (for inline resources)"""
         endpoint = "/ng/api/environmentsV2"
         params = {}
@@ -505,12 +505,13 @@ class HarnessAPIClient:
         # Build JSON payload with YAML content and identifiers
         data = {
             'yaml': yaml_content,
-            'accountId': self.account_id
+            'accountId': self.account_id,
+            'identifier': identifier,
+            'type': type,
+            'name': name,
+            'orgIdentifier': org_identifier,
+            'projectIdentifier': project_identifier
         }
-        if org_identifier:
-            data['organizationId'] = org_identifier
-        if project_identifier:
-            data['projectId'] = project_identifier
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
@@ -1006,8 +1007,10 @@ class HarnessMigrator:
                             results['failed'] += 1
                     else:
                         # Inline: Use create endpoint with YAML content
+                        env_type = env_data.get('type', 'Production')  # Default to Production if not specified
                         if self.dest_client.create_environment(
-                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
+                            yaml_content=yaml_content, identifier=identifier, type=env_type, name=name,
+                            org_identifier=org_id, project_identifier=project_id
                         ):
                             results['success'] += 1
                         else:
