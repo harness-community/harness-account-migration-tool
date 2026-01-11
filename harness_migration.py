@@ -397,15 +397,23 @@ class HarnessAPIClient:
             print(f"Failed to create service: {response.status_code} - {response.text}")
             return False
     
-    def import_service_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
-                           project_identifier: Optional[str] = None) -> bool:
+    def import_service_yaml(self, git_details: Dict, service_identifier: str,
+                           connector_ref: Optional[str] = None,
+                           org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Import service from Git location (for GitX resources only)"""
         endpoint = "/ng/api/servicesV2/import"
-        params = {}
+        params = {
+            'accountIdentifier': self.account_id,
+            'serviceIdentifier': service_identifier
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        
+        # Add connector reference if provided
+        if connector_ref:
+            params['connectorRef'] = connector_ref
         
         # Add git details fields to query parameters
         if 'repoName' in git_details:
@@ -1231,7 +1239,7 @@ class HarnessMigrator:
                 
                 if is_gitx:
                     # GitX: Get git details for import
-                    git_details = service_data.get('entityGitDetails', {})
+                    git_details = service_data.get('entityGitDetails', {}) or service_data.get('gitDetails', {})
                     if not git_details:
                         print(f"  Failed to get git details for GitX service {name}")
                         results['failed'] += 1
@@ -1263,8 +1271,11 @@ class HarnessMigrator:
                 else:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
+                        connector_ref = service_data.get('connectorRef')
                         if self.dest_client.import_service_yaml(
-                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                            git_details=git_details, service_identifier=identifier,
+                            connector_ref=connector_ref,
+                            org_identifier=org_id, project_identifier=project_id
                         ):
                             results['success'] += 1
                         else:
