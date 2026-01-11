@@ -657,10 +657,12 @@ class HarnessAPIClient:
             print(f"Request error: {e}")
             return False
     
-    def list_infrastructures(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all infrastructures"""
+    def list_infrastructures(self, environment_identifier: str, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all infrastructures for a specific environment"""
         endpoint = "/ng/api/infrastructures"
-        params = {}
+        params = {
+            'environmentIdentifier': environment_identifier
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -706,11 +708,13 @@ class HarnessAPIClient:
             return infra_data.get('yaml', '')
         return None
     
-    def create_infrastructure(self, yaml_content: str, org_identifier: Optional[str] = None,
-                            project_identifier: Optional[str] = None) -> bool:
+    def create_infrastructure(self, yaml_content: str, environment_identifier: str,
+                            org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Create infrastructure from YAML content (for inline resources)"""
         endpoint = "/ng/api/infrastructures"
-        params = {}
+        params = {
+            'environmentIdentifier': environment_identifier
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -719,7 +723,8 @@ class HarnessAPIClient:
         # Build JSON payload with YAML content and identifiers
         data = {
             'yaml': yaml_content,
-            'accountId': self.account_id
+            'accountId': self.account_id,
+            'environmentIdentifier': environment_identifier
         }
         if org_identifier:
             data['organizationId'] = org_identifier
@@ -735,15 +740,25 @@ class HarnessAPIClient:
             print(f"Failed to create infrastructure: {response.status_code} - {response.text}")
             return False
     
-    def import_infrastructure_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
-                                  project_identifier: Optional[str] = None) -> bool:
+    def import_infrastructure_yaml(self, git_details: Dict, infrastructure_identifier: str,
+                                  environment_identifier: str,
+                                  connector_ref: Optional[str] = None,
+                                  org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Import infrastructure from Git location (for GitX resources only)"""
         endpoint = "/ng/api/infrastructures/import"
-        params = {}
+        params = {
+            'accountIdentifier': self.account_id,
+            'infrastructureIdentifier': infrastructure_identifier,
+            'environmentIdentifier': environment_identifier
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        
+        # Add connector reference if provided
+        if connector_ref:
+            params['connectorRef'] = connector_ref
         
         # Add git details fields to query parameters
         if 'repoName' in git_details:
@@ -1026,7 +1041,7 @@ class HarnessMigrator:
                 else:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
-                        connector_ref = env_data.get('connectorRef')
+                        connector_ref = env_data.get('connectorxRef')
                         if self.dest_client.import_environment_yaml(
                             git_details=git_details, environment_identifier=identifier,
                             connector_ref=connector_ref,
@@ -1061,85 +1076,115 @@ class HarnessMigrator:
             scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
             print(f"\n--- Processing infrastructures at {scope_label} ---")
             
-            infrastructures = self.source_client.list_infrastructures(org_id, project_id)
+            # First, get all environments for this scope
+            environments = self.source_client.list_environments(org_id, project_id)
             
-            for infra in infrastructures:
-                identifier = infra.get('identifier', '')
-                env_identifier = infra.get('envIdentifier', '')
-                name = infra.get('name', identifier)
-                print(f"\nProcessing infrastructure: {name} ({identifier}) at {scope_label}")
+            if not environments:
+                print(f"  No environments found at {scope_label}, skipping infrastructures")
+                continue
+            
+            # Iterate through each environment to find infrastructures
+            for env in environments:
+                # Extract environment data from nested structure if present
+                env_item = env.get('environment', env)
+                env_identifier = env_item.get('identifier', '')
+                env_name = env_item.get('name', env_identifier)
                 
-                # Get infrastructure data to detect storage type
-                infra_data = self.source_client.get_infrastructure_data(
-                    identifier, env_identifier, org_id, project_id
-                )
-                
-                if not infra_data:
-                    print(f"  Failed to get data for infrastructure {name}")
-                    results['failed'] += 1
+                if not env_identifier:
                     continue
                 
-                # Detect if infrastructure is GitX or Inline
-                is_gitx = self.source_client.is_gitx_resource(infra_data)
-                storage_type = "GitX" if is_gitx else "Inline"
-                print(f"  Infrastructure storage type: {storage_type}")
+                print(f"\n  Checking infrastructures for environment: {env_name} ({env_identifier})")
                 
-                # Save exported data
-                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                # Get infrastructures for this environment
+                infrastructures = self.source_client.list_infrastructures(env_identifier, org_id, project_id)
                 
-                yaml_content = None
-                git_details = None
+                if not infrastructures:
+                    print(f"    No infrastructures found for environment {env_name}")
+                    continue
                 
-                if is_gitx:
-                    # GitX: Get git details for import
-                    git_details = infra_data.get('gitDetails', {})
-                    if not git_details:
-                        print(f"  Failed to get git details for GitX infrastructure {name}")
+                for infra in infrastructures:
+                    # Extract infrastructure data from nested structure if present
+                    infra_item = infra.get('infrastructure', infra)
+                    identifier = infra_item.get('identifier', '')
+                    name = infra_item.get('name', identifier)
+                    print(f"\nProcessing infrastructure: {name} ({identifier}) in environment {env_name} at {scope_label}")
+                    
+                    # Get infrastructure data to detect storage type
+                    infra_data = self.source_client.get_infrastructure_data(
+                        identifier, env_identifier, org_id, project_id
+                    )
+                    
+                    if not infra_data:
+                        print(f"  Failed to get data for infrastructure {name}")
                         results['failed'] += 1
                         continue
-                    # Also get YAML for export
-                    yaml_content = infra_data.get('yaml', '')
-                    export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
-                    if yaml_content:
+                    
+                    # Detect if infrastructure is GitX or Inline
+                    is_gitx = self.source_client.is_gitx_resource(infra_data)
+                    storage_type = "GitX" if is_gitx else "Inline"
+                    print(f"  Infrastructure storage type: {storage_type}")
+                    
+                    # Save exported data
+                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    
+                    yaml_content = None
+                    git_details = None
+                    
+                    if is_gitx:
+                        # GitX: Get git details for import
+                        git_details = infra_data.get('entityGitDetails', {}) or infra_data.get('gitDetails', {})
+                        if not git_details:
+                            print(f"  Failed to get git details for GitX infrastructure {name}")
+                            results['failed'] += 1
+                            continue
+                        # Also get YAML for export
+                        yaml_content = infra_data.get('yaml', '')
+                        export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
+                        if yaml_content:
+                            export_file.write_text(yaml_content)
+                            print(f"  Exported YAML to {export_file}")
+                    else:
+                        # Inline: Get YAML content for import
+                        yaml_content = infra_data.get('yaml', '')
+                        if not yaml_content:
+                            print(f"  Failed to get YAML for inline infrastructure {name}")
+                            results['failed'] += 1
+                            continue
+                        export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
                         export_file.write_text(yaml_content)
                         print(f"  Exported YAML to {export_file}")
-                else:
-                    # Inline: Get YAML content for import
-                    yaml_content = infra_data.get('yaml', '')
-                    if not yaml_content:
-                        print(f"  Failed to get YAML for inline infrastructure {name}")
-                        results['failed'] += 1
-                        continue
-                    export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
-                    export_file.write_text(yaml_content)
-                    print(f"  Exported YAML to {export_file}")
-                
-                # Import to destination (skip in dry-run mode)
-                if self.dry_run:
-                    if is_gitx:
-                        print(f"  [DRY RUN] Would import infrastructure (GitX) from git location")
-                    else:
-                        print(f"  [DRY RUN] Would create infrastructure (Inline) with YAML content")
-                    results['success'] += 1
-                else:
-                    if is_gitx:
-                        # GitX: Use import endpoint with git details
-                        if self.dest_client.import_infrastructure_yaml(
-                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
-                        ):
-                            results['success'] += 1
+                    
+                    # Import to destination (skip in dry-run mode)
+                    if self.dry_run:
+                        if is_gitx:
+                            print(f"  [DRY RUN] Would import infrastructure (GitX) from git location")
                         else:
-                            results['failed'] += 1
+                            print(f"  [DRY RUN] Would create infrastructure (Inline) with YAML content")
+                        results['success'] += 1
                     else:
-                        # Inline: Use create endpoint with YAML content
-                        if self.dest_client.create_infrastructure(
-                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
-                        ):
-                            results['success'] += 1
+                        if is_gitx:
+                            # GitX: Use import endpoint with git details
+                            connector_ref = infra_data.get('connectorRef')
+                            if self.dest_client.import_infrastructure_yaml(
+                                git_details=git_details, infrastructure_identifier=identifier,
+                                environment_identifier=env_identifier,
+                                connector_ref=connector_ref,
+                                org_identifier=org_id, project_identifier=project_id
+                            ):
+                                results['success'] += 1
+                            else:
+                                results['failed'] += 1
                         else:
-                            results['failed'] += 1
-                
-                time.sleep(0.5)  # Rate limiting
+                            # Inline: Use create endpoint with YAML content
+                            if self.dest_client.create_infrastructure(
+                                yaml_content=yaml_content, environment_identifier=env_identifier,
+                                org_identifier=org_id, project_identifier=project_id
+                            ):
+                                results['success'] += 1
+                            else:
+                                results['failed'] += 1
+                    
+                    time.sleep(0.5)  # Rate limiting
         
         return results
     
