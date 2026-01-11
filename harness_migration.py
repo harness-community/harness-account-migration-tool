@@ -11,7 +11,7 @@ import json
 import yaml
 import os
 import sys
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import time
 import argparse
@@ -65,20 +65,30 @@ class HarnessAPIClient:
             'Content-Type': 'application/json'
         }
     
-    def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None) -> requests.Response:
+    def _make_request(self, method: str, endpoint: str, data: Optional[Union[Dict, str]] = None, 
+                     params: Optional[Dict] = None, headers: Optional[Dict] = None) -> requests.Response:
         """Make an API request"""
         url = f"{self.base_url}{endpoint}"
         if params is None:
             params = {}
         params['accountIdentifier'] = self.account_id
         
+        # Merge custom headers with default headers
+        request_headers = self.headers.copy()
+        if headers:
+            request_headers.update(headers)
+        
         try:
             if method.upper() == 'GET':
-                response = requests.get(url, headers=self.headers, params=params, json=data)
+                response = requests.get(url, headers=request_headers, params=params, json=data if isinstance(data, dict) else None)
             elif method.upper() == 'POST':
-                response = requests.post(url, headers=self.headers, params=params, json=data)
+                # If data is a string, send it as raw data; otherwise send as JSON
+                if isinstance(data, str):
+                    response = requests.post(url, headers=request_headers, params=params, data=data)
+                else:
+                    response = requests.post(url, headers=request_headers, params=params, json=data)
             elif method.upper() == 'PUT':
-                response = requests.put(url, headers=self.headers, params=params, json=data)
+                response = requests.put(url, headers=request_headers, params=params, json=data if isinstance(data, dict) else None)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -254,9 +264,38 @@ class HarnessAPIClient:
             return pipeline_data.get('yamlPipeline', '')
         return None
     
-    def import_pipeline_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
-                             org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
-        """Import pipeline from YAML or Git location"""
+    def create_pipeline(self, yaml_content: str, org_identifier: Optional[str] = None,
+                       project_identifier: Optional[str] = None) -> bool:
+        """Create pipeline from YAML content (for inline resources)"""
+        endpoint = "/pipeline/api/pipelines"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with YAML content and identifiers
+        data = {
+            'yaml': yaml_content,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            data['organizationId'] = org_identifier
+        if project_identifier:
+            data['projectId'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created pipeline")
+            return True
+        else:
+            print(f"Failed to create pipeline: {response.status_code} - {response.text}")
+            return False
+    
+    def import_pipeline_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
+                             project_identifier: Optional[str] = None) -> bool:
+        """Import pipeline from Git location (for GitX resources only)"""
         endpoint = "/pipeline/api/pipelines/import-pipeline"
         params = {}
         if org_identifier:
@@ -265,20 +304,17 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         data = {
-            'isForceImport': False
+            'isForceImport': False,
+            'gitDetails': git_details
         }
-        if yaml_content:
-            data['pipelineYaml'] = yaml_content
-        if git_details:
-            data['gitDetails'] = git_details
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
         if response.status_code in [200, 201]:
-            print(f"Successfully imported pipeline")
+            print(f"Successfully imported pipeline from GitX")
             return True
         else:
-            print(f"Failed to import pipeline: {response.status_code} - {response.text}")
+            print(f"Failed to import pipeline from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -328,9 +364,38 @@ class HarnessAPIClient:
             return service_data.get('yaml', '')
         return None
     
-    def import_service_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
-                           org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
-        """Import service from YAML or Git location"""
+    def create_service(self, yaml_content: str, org_identifier: Optional[str] = None,
+                      project_identifier: Optional[str] = None) -> bool:
+        """Create service from YAML content (for inline resources)"""
+        endpoint = "/ng/api/servicesV2"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with YAML content and identifiers
+        data = {
+            'yaml': yaml_content,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            data['organizationId'] = org_identifier
+        if project_identifier:
+            data['projectId'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created service")
+            return True
+        else:
+            print(f"Failed to create service: {response.status_code} - {response.text}")
+            return False
+    
+    def import_service_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
+                           project_identifier: Optional[str] = None) -> bool:
+        """Import service from Git location (for GitX resources only)"""
         endpoint = "/ng/api/servicesV2/import"
         params = {}
         if org_identifier:
@@ -338,19 +403,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {}
-        if yaml_content:
-            data['yaml'] = yaml_content
-        if git_details:
-            data['gitDetails'] = git_details
+        data = {
+            'gitDetails': git_details
+        }
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
         if response.status_code in [200, 201]:
-            print(f"Successfully imported service")
+            print(f"Successfully imported service from GitX")
             return True
         else:
-            print(f"Failed to import service: {response.status_code} - {response.text}")
+            print(f"Failed to import service from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -408,8 +471,9 @@ class HarnessAPIClient:
         if resource_data.get('storeType') == 'INLINE':
             return False
         
-        # Check for gitDetails field
-        if 'gitDetails' in resource_data and resource_data.get('gitDetails'):
+        # Check for gitDetails or entityGitDetails field
+        if ('gitDetails' in resource_data and resource_data.get('gitDetails')) or \
+            ('entityGitDetails' in resource_data and resource_data.get('entityGitDetails')):
             return True
         
         # Check for git-related fields
@@ -419,8 +483,8 @@ class HarnessAPIClient:
         # Check for yaml field - if present and no storeType, might be inline with YAML
         # But if gitDetails exist, it's GitX
         if 'yaml' in resource_data and resource_data.get('yaml'):
-            # If there's gitDetails, it's GitX
-            if 'gitDetails' in resource_data:
+            # If there's gitDetails or entityGitDetails, it's GitX
+            if 'gitDetails' in resource_data or 'entityGitDetails' in resource_data:
                 return True
             # Otherwise assume inline (YAML content stored inline)
             return False
@@ -428,9 +492,38 @@ class HarnessAPIClient:
         # Default: assume Inline if no indicators found
         return False
     
-    def import_environment_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
-                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
-        """Import environment from YAML or Git location"""
+    def create_environment(self, yaml_content: str, org_identifier: Optional[str] = None,
+                          project_identifier: Optional[str] = None) -> bool:
+        """Create environment from YAML content (for inline resources)"""
+        endpoint = "/ng/api/environmentsV2"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with YAML content and identifiers
+        data = {
+            'yaml': yaml_content,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            data['organizationId'] = org_identifier
+        if project_identifier:
+            data['projectId'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created environment")
+            return True
+        else:
+            print(f"Failed to create environment: {response.status_code} - {response.text}")
+            return False
+    
+    def import_environment_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
+                               project_identifier: Optional[str] = None) -> bool:
+        """Import environment from Git location (for GitX resources only)"""
         endpoint = "/ng/api/environmentsV2/import"
         params = {}
         if org_identifier:
@@ -438,19 +531,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {}
-        if yaml_content:
-            data['yaml'] = yaml_content
-        if git_details:
-            data['gitDetails'] = git_details
+        data = {
+            'gitDetails': git_details
+        }
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
         if response.status_code in [200, 201]:
-            print(f"Successfully imported environment")
+            print(f"Successfully imported environment from GitX")
             return True
         else:
-            print(f"Failed to import environment: {response.status_code} - {response.text}")
+            print(f"Failed to import environment from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_connectors(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -592,9 +683,38 @@ class HarnessAPIClient:
             return infra_data.get('yaml', '')
         return None
     
-    def import_infrastructure_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
-                                  org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
-        """Import infrastructure from YAML or Git location"""
+    def create_infrastructure(self, yaml_content: str, org_identifier: Optional[str] = None,
+                            project_identifier: Optional[str] = None) -> bool:
+        """Create infrastructure from YAML content (for inline resources)"""
+        endpoint = "/ng/api/infrastructures"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with YAML content and identifiers
+        data = {
+            'yaml': yaml_content,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            data['organizationId'] = org_identifier
+        if project_identifier:
+            data['projectId'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created infrastructure")
+            return True
+        else:
+            print(f"Failed to create infrastructure: {response.status_code} - {response.text}")
+            return False
+    
+    def import_infrastructure_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
+                                  project_identifier: Optional[str] = None) -> bool:
+        """Import infrastructure from Git location (for GitX resources only)"""
         endpoint = "/ng/api/infrastructures/import"
         params = {}
         if org_identifier:
@@ -602,19 +722,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {}
-        if yaml_content:
-            data['yaml'] = yaml_content
-        if git_details:
-            data['gitDetails'] = git_details
+        data = {
+            'gitDetails': git_details
+        }
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
         if response.status_code in [200, 201]:
-            print(f"Successfully imported infrastructure")
+            print(f"Successfully imported infrastructure from GitX")
             return True
         else:
-            print(f"Failed to import infrastructure: {response.status_code} - {response.text}")
+            print(f"Failed to import infrastructure from GitX: {response.status_code} - {response.text}")
             return False
 
 
@@ -875,15 +993,25 @@ class HarnessMigrator:
                     if is_gitx:
                         print(f"  [DRY RUN] Would import environment (GitX) from git location")
                     else:
-                        print(f"  [DRY RUN] Would import environment (Inline) with YAML content")
+                        print(f"  [DRY RUN] Would create environment (Inline) with YAML content")
                     results['success'] += 1
                 else:
-                    if self.dest_client.import_environment_yaml(
-                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
-                    ):
-                        results['success'] += 1
+                    if is_gitx:
+                        # GitX: Use import endpoint with git details
+                        if self.dest_client.import_environment_yaml(
+                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                     else:
-                        results['failed'] += 1
+                        # Inline: Use create endpoint with YAML content
+                        if self.dest_client.create_environment(
+                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
@@ -958,15 +1086,25 @@ class HarnessMigrator:
                     if is_gitx:
                         print(f"  [DRY RUN] Would import infrastructure (GitX) from git location")
                     else:
-                        print(f"  [DRY RUN] Would import infrastructure (Inline) with YAML content")
+                        print(f"  [DRY RUN] Would create infrastructure (Inline) with YAML content")
                     results['success'] += 1
                 else:
-                    if self.dest_client.import_infrastructure_yaml(
-                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
-                    ):
-                        results['success'] += 1
+                    if is_gitx:
+                        # GitX: Use import endpoint with git details
+                        if self.dest_client.import_infrastructure_yaml(
+                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                     else:
-                        results['failed'] += 1
+                        # Inline: Use create endpoint with YAML content
+                        if self.dest_client.create_infrastructure(
+                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
@@ -1042,15 +1180,25 @@ class HarnessMigrator:
                     if is_gitx:
                         print(f"  [DRY RUN] Would import service (GitX) from git location")
                     else:
-                        print(f"  [DRY RUN] Would import service (Inline) with YAML content")
+                        print(f"  [DRY RUN] Would create service (Inline) with YAML content")
                     results['success'] += 1
                 else:
-                    if self.dest_client.import_service_yaml(
-                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
-                    ):
-                        results['success'] += 1
+                    if is_gitx:
+                        # GitX: Use import endpoint with git details
+                        if self.dest_client.import_service_yaml(
+                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                     else:
-                        results['failed'] += 1
+                        # Inline: Use create endpoint with YAML content
+                        if self.dest_client.create_service(
+                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
@@ -1126,15 +1274,25 @@ class HarnessMigrator:
                     if is_gitx:
                         print(f"  [DRY RUN] Would import pipeline (GitX) from git location")
                     else:
-                        print(f"  [DRY RUN] Would import pipeline (Inline) with YAML content")
+                        print(f"  [DRY RUN] Would create pipeline (Inline) with YAML content")
                     results['success'] += 1
                 else:
-                    if self.dest_client.import_pipeline_yaml(
-                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
-                    ):
-                        results['success'] += 1
+                    if is_gitx:
+                        # GitX: Use import endpoint with git details
+                        if self.dest_client.import_pipeline_yaml(
+                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                     else:
-                        results['failed'] += 1
+                        # Inline: Use create endpoint with YAML content
+                        if self.dest_client.create_pipeline(
+                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
