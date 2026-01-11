@@ -1015,7 +1015,7 @@ class HarnessMigrator:
                 
                 if is_gitx:
                     # GitX: Get git details for import
-                    git_details = service_data.get('gitDetails', {})
+                    git_details = service_data.get('entityGitDetails', {})
                     if not git_details:
                         print(f"  Failed to get git details for GitX service {name}")
                         results['failed'] += 1
