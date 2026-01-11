@@ -275,6 +275,76 @@ Exported files include scope information:
 
 ## Common Patterns
 
+### Harness API List Response Pattern
+
+**Critical Pattern**: Harness API list endpoints return resources in a nested structure where each item in the list contains the resource data under a key matching the resource name.
+
+**List Response Format**:
+```json
+[
+  {
+    "resourceName": {
+      "identifier": "...",
+      "name": "...",
+      // ... other resource fields
+    }
+  },
+  // ... more resources
+]
+```
+
+**Example**: For infrastructures, the response looks like:
+```json
+[
+  {
+    "infrastructure": {
+      "identifier": "my-infra",
+      "name": "My Infrastructure",
+      "envIdentifier": "my-env"
+    }
+  }
+]
+```
+
+**Not**:
+```json
+[
+  {
+    "identifier": "my-infra",
+    "name": "My Infrastructure",
+    "envIdentifier": "my-env"
+  }
+]
+```
+
+**Required Pattern for All List Iterations**:
+When iterating through list responses, **always** extract the resource data from the nested key:
+
+```python
+for item in list_response:
+    # Extract from key matching resource name, fallback to item itself
+    resource_item = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'infrastructure'
+    identifier = resource_item.get('identifier', '')
+    name = resource_item.get('name', identifier)
+    # ... use resource_item for all data access
+```
+
+**Why This Pattern Exists**:
+- Harness API uses this structure to include metadata alongside resource data
+- The nested key allows for future API extensions without breaking changes
+- Some resources may include additional fields at the top level alongside the resource object
+
+**Resources Using This Pattern**:
+- **Connectors**: `item.get('connector', item)`
+- **Environments**: `item.get('environment', item)`
+- **Infrastructures**: `item.get('infrastructure', item)`
+- **Services**: `item.get('service', item)`
+- **Pipelines**: `item.get('pipeline', item)`
+- **Projects**: `item.get('project', item)`
+- **Organizations**: `item.get('organization', item)`
+
+**Important**: Always use the fallback pattern `item.get('resourceName', item)` to handle cases where the API might return the data directly (for backward compatibility or different API versions).
+
 ### Adding a New Resource Type
 
 **Important**: First determine if the resource uses GitX (YAML) or Inline (data fields) storage. Many resources support both, so you'll need to detect and handle both cases.
@@ -373,8 +443,9 @@ Exported files include scope information:
        for org_id, project_id in scopes:
            resources = self.source_client.list_new_resource(org_id, project_id)
            for resource in resources:
-               # Extract from nested key if present (e.g., resource.get('newResource', resource))
-               resource_item = resource.get('newResource', resource)
+               # CRITICAL: Extract from nested key matching resource name (singular form)
+               # Harness API always returns list items as: [{'resourceName': {<data>}}]
+               resource_item = resource.get('newResource', resource)  # e.g., 'connector', 'environment', 'infrastructure'
                identifier = resource_item.get('identifier', '')
                name = resource_item.get('name', identifier)
                
@@ -488,25 +559,36 @@ Common nested keys:
 
 #### Pattern for Extracting Nested Data from List Responses:
 
-When iterating through list responses, extract the actual resource data from nested keys:
+**This is a universal pattern for ALL Harness list APIs**. When iterating through list responses, **always** extract the actual resource data from nested keys:
+
 ```python
 for item in list_response:
-    # Extract from key matching resource name, fallback to item itself
-    resource_data = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'project'
+    # CRITICAL: Extract from key matching resource name, fallback to item itself
+    # The key name matches the resource type (singular form)
+    resource_data = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'infrastructure', 'service', 'pipeline'
     identifier = resource_data.get('identifier', '')
     name = resource_data.get('name', identifier)
+    # ... always use resource_data for all field access, never use item directly
 ```
+
+**Common Mistakes to Avoid**:
+- ❌ **Don't do**: `identifier = item.get('identifier', '')` - this will fail because the identifier is nested
+- ✅ **Do**: `resource_item = item.get('infrastructure', item); identifier = resource_item.get('identifier', '')`
+- ❌ **Don't assume**: The list contains flat objects
+- ✅ **Always assume**: The list contains objects with nested resource data under a key matching the resource name
 
 ### Handling Special Cases
 
-- **Nested Data Extraction in List Responses**: Many list APIs return resources nested under a key matching the resource name:
-  - **Connectors**: Extract from `connector` key in list response: `connector.get('connector', connector)`
-  - **Projects**: Extract from `project` key in list response: `project.get('project', project)`
-  - **Organizations**: Extract from `organization` key in list response: `org.get('organization', org)`
-  - **Environments**: Extract from `environment` key in list response: `env.get('environment', env)`
-  - **Services**: Extract from `service` key in list response: `service.get('service', service)`
-  - **Pipelines**: Extract from `pipeline` key in list response: `pipeline.get('pipeline', pipeline)`
-  - Always use fallback to the item itself if the key doesn't exist
+- **Nested Data Extraction in List Responses**: **ALL** Harness list APIs return resources nested under a key matching the resource name. This is a universal pattern:
+  - **Connectors**: Extract from `connector` key: `connector.get('connector', connector)`
+  - **Projects**: Extract from `project` key: `project.get('project', project)`
+  - **Organizations**: Extract from `organization` key: `org.get('organization', org)`
+  - **Environments**: Extract from `environment` key: `env.get('environment', env)`
+  - **Infrastructures**: Extract from `infrastructure` key: `infra.get('infrastructure', infra)`
+  - **Services**: Extract from `service` key: `service.get('service', service)`
+  - **Pipelines**: Extract from `pipeline` key: `pipeline.get('pipeline', pipeline)`
+  - **Always use fallback pattern**: `item.get('resourceName', item)` to handle cases where the key might not exist
+  - **Never access fields directly** from the list item - always extract from the nested key first
 - **Nested Data Extraction in Get Responses**: When getting individual resource data, extract from nested structure:
   - Use pattern: `data.get('data', {}).get('resourceName', data.get('data', {}))`
   - Example: `data.get('data', {}).get('environment', data.get('data', {}))`
