@@ -264,25 +264,31 @@ class HarnessAPIClient:
             return pipeline_data.get('yamlPipeline', '')
         return None
     
-    def create_pipeline(self, yaml_content: str, org_identifier: Optional[str] = None,
-                       project_identifier: Optional[str] = None) -> bool:
+    def create_pipeline(self, yaml_content: str, identifier: str, name: str,
+                       org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                       tags: Optional[Dict[str, str]] = None) -> bool:
         """Create pipeline from YAML content (for inline resources)"""
-        endpoint = "/pipeline/api/pipelines"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
-        
+        endpoint = "/v1/orgs/{org}/projects/{project}/pipelines"
+        endpoint = endpoint.format(org=org_identifier, project=project_identifier)
+
         # Build JSON payload with YAML content and identifiers
         data = {
             'pipeline_yaml': yaml_content,
-            'accountId': self.account_id
+            'accountId': self.account_id,
+            'identifier': identifier,
+            'name': name,
+            'orgIdentifier': org_identifier,
+            'projectIdentifier': project_identifier
         }
-        if org_identifier:
-            data['organizationId'] = org_identifier
-        if project_identifier:
-            data['projectId'] = project_identifier
+        
+        # Add tags if provided
+        if tags:
+            data['tags'] = tags
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
@@ -1377,8 +1383,20 @@ class HarnessMigrator:
                             results['failed'] += 1
                     else:
                         # Inline: Use create endpoint with YAML content
+                        # Extract tags from YAML document
+                        tags = None
+                        if yaml_content:
+                            try:
+                                parsed_yaml = yaml.safe_load(yaml_content)
+                                if parsed_yaml and isinstance(parsed_yaml, dict):
+                                    # Tags are typically at pipeline.tags or directly at tags
+                                    tags = parsed_yaml.get('pipeline', {}).get('tags') or parsed_yaml.get('tags')
+                            except Exception as e:
+                                print(f"  Warning: Failed to parse YAML for tags: {e}")
+                        
                         if self.dest_client.create_pipeline(
-                            yaml_content=yaml_content, org_identifier=org_id, project_identifier=project_id
+                            yaml_content=yaml_content, identifier=identifier, name=name,
+                            org_identifier=org_id, project_identifier=project_id, tags=tags
                         ):
                             results['success'] += 1
                         else:
