@@ -303,12 +303,16 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'isForceImport': False,
-            'gitDetails': git_details
-        }
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        # No data body for GitX import
+        response = self._make_request('POST', endpoint, params=params, data=None)
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported pipeline from GitX")
@@ -403,11 +407,16 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'gitDetails': git_details
-        }
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        # No data body for GitX import
+        response = self._make_request('POST', endpoint, params=params, data=None)
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported service from GitX")
@@ -522,21 +531,34 @@ class HarnessAPIClient:
             print(f"Failed to create environment: {response.status_code} - {response.text}")
             return False
     
-    def import_environment_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
-                               project_identifier: Optional[str] = None) -> bool:
+    def import_environment_yaml(self, git_details: Dict, environment_identifier: str,
+                               connector_ref: Optional[str] = None,
+                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Import environment from Git location (for GitX resources only)"""
         endpoint = "/ng/api/environmentsV2/import"
-        params = {}
+        params = {
+            'accountIdentifier': self.account_id,
+            'environmentIdentifier': environment_identifier
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'gitDetails': git_details
-        }
+        # Add connector reference if provided
+        if connector_ref:
+            params['connectorRef'] = connector_ref
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
+        
+        # No data body for GitX import
+        response = self._make_request('POST', endpoint, params=params, data=None)
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported environment from GitX")
@@ -723,11 +745,16 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'gitDetails': git_details
-        }
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        # No data body for GitX import
+        response = self._make_request('POST', endpoint, params=params, data=None)
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported infrastructure from GitX")
@@ -999,8 +1026,11 @@ class HarnessMigrator:
                 else:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
+                        connector_ref = env_data.get('connectorRef')
                         if self.dest_client.import_environment_yaml(
-                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                            git_details=git_details, environment_identifier=identifier,
+                            connector_ref=connector_ref,
+                            org_identifier=org_id, project_identifier=project_id
                         ):
                             results['success'] += 1
                         else:
