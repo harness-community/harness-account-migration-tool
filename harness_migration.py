@@ -225,9 +225,9 @@ class HarnessAPIClient:
             print(f"Failed to list pipelines: {response.status_code} - {response.text}")
             return []
     
-    def get_pipeline_yaml(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
-                         project_identifier: Optional[str] = None) -> Optional[str]:
-        """Get pipeline YAML"""
+    def get_pipeline_data(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
+                         project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get pipeline data (for both GitX and Inline detection)"""
         endpoint = f"/pipeline/api/pipelines/{pipeline_identifier}"
         params = {}
         if org_identifier:
@@ -239,14 +239,22 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {}).get('yamlPipeline', '')
+            return data.get('data', {})
         else:
-            print(f"Failed to get pipeline YAML: {response.status_code} - {response.text}")
+            print(f"Failed to get pipeline data: {response.status_code} - {response.text}")
             return None
     
-    def import_pipeline_yaml(self, yaml_content: str, org_identifier: Optional[str] = None,
-                             project_identifier: Optional[str] = None) -> bool:
-        """Import pipeline from YAML"""
+    def get_pipeline_yaml(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
+                         project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get pipeline YAML"""
+        pipeline_data = self.get_pipeline_data(pipeline_identifier, org_identifier, project_identifier)
+        if pipeline_data:
+            return pipeline_data.get('yamlPipeline', '')
+        return None
+    
+    def import_pipeline_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
+                             org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Import pipeline from YAML or Git location"""
         endpoint = "/pipeline/api/pipelines/import-pipeline"
         params = {}
         if org_identifier:
@@ -255,9 +263,12 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         data = {
-            'pipelineYaml': yaml_content,
             'isForceImport': False
         }
+        if yaml_content:
+            data['pipelineYaml'] = yaml_content
+        if git_details:
+            data['gitDetails'] = git_details
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
@@ -286,9 +297,9 @@ class HarnessAPIClient:
             print(f"Failed to list services: {response.status_code} - {response.text}")
             return []
     
-    def get_service_yaml(self, service_identifier: str, org_identifier: Optional[str] = None,
-                        project_identifier: Optional[str] = None) -> Optional[str]:
-        """Get service YAML"""
+    def get_service_data(self, service_identifier: str, org_identifier: Optional[str] = None,
+                        project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get service data (for both GitX and Inline detection)"""
         endpoint = f"/ng/api/servicesV2/{service_identifier}"
         params = {}
         if org_identifier:
@@ -300,14 +311,22 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {}).get('yaml', '')
+            return data.get('data', {})
         else:
-            print(f"Failed to get service YAML: {response.status_code} - {response.text}")
+            print(f"Failed to get service data: {response.status_code} - {response.text}")
             return None
     
-    def import_service_yaml(self, yaml_content: str, org_identifier: Optional[str] = None,
-                           project_identifier: Optional[str] = None) -> bool:
-        """Import service from YAML"""
+    def get_service_yaml(self, service_identifier: str, org_identifier: Optional[str] = None,
+                        project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get service YAML"""
+        service_data = self.get_service_data(service_identifier, org_identifier, project_identifier)
+        if service_data:
+            return service_data.get('yaml', '')
+        return None
+    
+    def import_service_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
+                           org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Import service from YAML or Git location"""
         endpoint = "/ng/api/servicesV2/import"
         params = {}
         if org_identifier:
@@ -315,9 +334,11 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'yaml': yaml_content
-        }
+        data = {}
+        if yaml_content:
+            data['yaml'] = yaml_content
+        if git_details:
+            data['gitDetails'] = git_details
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
@@ -346,9 +367,9 @@ class HarnessAPIClient:
             print(f"Failed to list environments: {response.status_code} - {response.text}")
             return []
     
-    def get_environment_yaml(self, environment_identifier: str, org_identifier: Optional[str] = None,
-                           project_identifier: Optional[str] = None) -> Optional[str]:
-        """Get environment YAML"""
+    def get_environment_data(self, environment_identifier: str, org_identifier: Optional[str] = None,
+                            project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get environment data (for both GitX and Inline detection)"""
         endpoint = f"/ng/api/environmentsV2/{environment_identifier}"
         params = {}
         if org_identifier:
@@ -360,14 +381,50 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {}).get('yaml', '')
+            return data.get('data', {})
         else:
-            print(f"Failed to get environment YAML: {response.status_code} - {response.text}")
+            print(f"Failed to get environment data: {response.status_code} - {response.text}")
             return None
     
-    def import_environment_yaml(self, yaml_content: str, org_identifier: Optional[str] = None,
-                               project_identifier: Optional[str] = None) -> bool:
-        """Import environment from YAML"""
+    def get_environment_yaml(self, environment_identifier: str, org_identifier: Optional[str] = None,
+                           project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get environment YAML"""
+        env_data = self.get_environment_data(environment_identifier, org_identifier, project_identifier)
+        if env_data:
+            return env_data.get('yaml', '')
+        return None
+    
+    def is_gitx_resource(self, resource_data: Dict) -> bool:
+        """Determine if resource is stored in GitX or Inline"""
+        # Check storeType field
+        if resource_data.get('storeType') == 'REMOTE':
+            return True
+        if resource_data.get('storeType') == 'INLINE':
+            return False
+        
+        # Check for gitDetails field
+        if 'gitDetails' in resource_data and resource_data.get('gitDetails'):
+            return True
+        
+        # Check for git-related fields
+        if 'repo' in resource_data or 'branch' in resource_data:
+            return True
+        
+        # Check for yaml field - if present and no storeType, might be inline with YAML
+        # But if gitDetails exist, it's GitX
+        if 'yaml' in resource_data and resource_data.get('yaml'):
+            # If there's gitDetails, it's GitX
+            if 'gitDetails' in resource_data:
+                return True
+            # Otherwise assume inline (YAML content stored inline)
+            return False
+        
+        # Default: assume Inline if no indicators found
+        return False
+    
+    def import_environment_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
+                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Import environment from YAML or Git location"""
         endpoint = "/ng/api/environmentsV2/import"
         params = {}
         if org_identifier:
@@ -375,9 +432,11 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'yaml': yaml_content
-        }
+        data = {}
+        if yaml_content:
+            data['yaml'] = yaml_content
+        if git_details:
+            data['gitDetails'] = git_details
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
@@ -496,9 +555,9 @@ class HarnessAPIClient:
             print(f"Failed to list infrastructures: {response.status_code} - {response.text}")
             return []
     
-    def get_infrastructure_yaml(self, infrastructure_identifier: str, environment_identifier: str,
-                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
-        """Get infrastructure YAML"""
+    def get_infrastructure_data(self, infrastructure_identifier: str, environment_identifier: str,
+                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get infrastructure data (for both GitX and Inline detection)"""
         endpoint = f"/ng/api/infrastructures/{infrastructure_identifier}"
         params = {
             'environmentIdentifier': environment_identifier
@@ -512,14 +571,22 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {}).get('yaml', '')
+            return data.get('data', {})
         else:
-            print(f"Failed to get infrastructure YAML: {response.status_code} - {response.text}")
+            print(f"Failed to get infrastructure data: {response.status_code} - {response.text}")
             return None
     
-    def import_infrastructure_yaml(self, yaml_content: str, org_identifier: Optional[str] = None,
-                                  project_identifier: Optional[str] = None) -> bool:
-        """Import infrastructure from YAML"""
+    def get_infrastructure_yaml(self, infrastructure_identifier: str, environment_identifier: str,
+                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get infrastructure YAML"""
+        infra_data = self.get_infrastructure_data(infrastructure_identifier, environment_identifier, org_identifier, project_identifier)
+        if infra_data:
+            return infra_data.get('yaml', '')
+        return None
+    
+    def import_infrastructure_yaml(self, yaml_content: Optional[str] = None, git_details: Optional[Dict] = None,
+                                  org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Import infrastructure from YAML or Git location"""
         endpoint = "/ng/api/infrastructures/import"
         params = {}
         if org_identifier:
@@ -527,9 +594,11 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'yaml': yaml_content
-        }
+        data = {}
+        if yaml_content:
+            data['yaml'] = yaml_content
+        if git_details:
+            data['gitDetails'] = git_details
         
         response = self._make_request('POST', endpoint, params=params, data=data)
         
@@ -742,32 +811,67 @@ class HarnessMigrator:
             environments = self.source_client.list_environments(org_id, project_id)
             
             for env in environments:
-                identifier = env.get('identifier', '')
-                name = env.get('name', identifier)
+                # Extract environment data from nested structure if present
+                env_item = env.get('environment', env)
+                identifier = env_item.get('identifier', '')
+                name = env_item.get('name', identifier)
                 print(f"\nProcessing environment: {name} ({identifier}) at {scope_label}")
                 
-                yaml_content = self.source_client.get_environment_yaml(
+                # Get environment data to detect storage type
+                env_data = self.source_client.get_environment_data(
                     identifier, org_id, project_id
                 )
                 
-                if not yaml_content:
-                    print(f"  Failed to get YAML for environment {name}")
+                if not env_data:
+                    print(f"  Failed to get data for environment {name}")
                     results['failed'] += 1
                     continue
                 
-                # Save exported YAML with scope in filename
+                # Detect if environment is GitX or Inline
+                is_gitx = self.source_client.is_gitx_resource(env_data)
+                storage_type = "GitX" if is_gitx else "Inline"
+                print(f"  Environment storage type: {storage_type}")
+                
+                # Save exported data
                 scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
-                export_file = self.export_dir / f"environment_{identifier}{scope_suffix}.yaml"
-                export_file.write_text(yaml_content)
-                print(f"  Exported YAML to {export_file}")
+                
+                yaml_content = None
+                git_details = None
+                
+                if is_gitx:
+                    # GitX: Get git details for import
+                    git_details = env_data.get('gitDetails', {})
+                    if not git_details:
+                        print(f"  Failed to get git details for GitX environment {name}")
+                        results['failed'] += 1
+                        continue
+                    # Also get YAML for export
+                    yaml_content = env_data.get('yaml', '')
+                    export_file = self.export_dir / f"environment_{identifier}{scope_suffix}.yaml"
+                    if yaml_content:
+                        export_file.write_text(yaml_content)
+                        print(f"  Exported YAML to {export_file}")
+                else:
+                    # Inline: Get YAML content for import
+                    yaml_content = env_data.get('yaml', '')
+                    if not yaml_content:
+                        print(f"  Failed to get YAML for inline environment {name}")
+                        results['failed'] += 1
+                        continue
+                    export_file = self.export_dir / f"environment_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(yaml_content)
+                    print(f"  Exported YAML to {export_file}")
                 
                 # Import to destination (skip in dry-run mode)
                 if self.dry_run:
-                    print(f"  [DRY RUN] Would import environment to destination account")
+                    if is_gitx:
+                        print(f"  [DRY RUN] Would import environment (GitX) from git location")
+                    else:
+                        print(f"  [DRY RUN] Would import environment (Inline) with YAML content")
                     results['success'] += 1
                 else:
                     if self.dest_client.import_environment_yaml(
-                        yaml_content, org_id, project_id
+                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
                     ):
                         results['success'] += 1
                     else:
@@ -796,28 +900,61 @@ class HarnessMigrator:
                 name = infra.get('name', identifier)
                 print(f"\nProcessing infrastructure: {name} ({identifier}) at {scope_label}")
                 
-                yaml_content = self.source_client.get_infrastructure_yaml(
+                # Get infrastructure data to detect storage type
+                infra_data = self.source_client.get_infrastructure_data(
                     identifier, env_identifier, org_id, project_id
                 )
                 
-                if not yaml_content:
-                    print(f"  Failed to get YAML for infrastructure {name}")
+                if not infra_data:
+                    print(f"  Failed to get data for infrastructure {name}")
                     results['failed'] += 1
                     continue
                 
-                # Save exported YAML with scope in filename
+                # Detect if infrastructure is GitX or Inline
+                is_gitx = self.source_client.is_gitx_resource(infra_data)
+                storage_type = "GitX" if is_gitx else "Inline"
+                print(f"  Infrastructure storage type: {storage_type}")
+                
+                # Save exported data
                 scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
-                export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
-                export_file.write_text(yaml_content)
-                print(f"  Exported YAML to {export_file}")
+                
+                yaml_content = None
+                git_details = None
+                
+                if is_gitx:
+                    # GitX: Get git details for import
+                    git_details = infra_data.get('gitDetails', {})
+                    if not git_details:
+                        print(f"  Failed to get git details for GitX infrastructure {name}")
+                        results['failed'] += 1
+                        continue
+                    # Also get YAML for export
+                    yaml_content = infra_data.get('yaml', '')
+                    export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
+                    if yaml_content:
+                        export_file.write_text(yaml_content)
+                        print(f"  Exported YAML to {export_file}")
+                else:
+                    # Inline: Get YAML content for import
+                    yaml_content = infra_data.get('yaml', '')
+                    if not yaml_content:
+                        print(f"  Failed to get YAML for inline infrastructure {name}")
+                        results['failed'] += 1
+                        continue
+                    export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(yaml_content)
+                    print(f"  Exported YAML to {export_file}")
                 
                 # Import to destination (skip in dry-run mode)
                 if self.dry_run:
-                    print(f"  [DRY RUN] Would import infrastructure to destination account")
+                    if is_gitx:
+                        print(f"  [DRY RUN] Would import infrastructure (GitX) from git location")
+                    else:
+                        print(f"  [DRY RUN] Would import infrastructure (Inline) with YAML content")
                     results['success'] += 1
                 else:
                     if self.dest_client.import_infrastructure_yaml(
-                        yaml_content, org_id, project_id
+                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
                     ):
                         results['success'] += 1
                     else:
@@ -845,28 +982,61 @@ class HarnessMigrator:
                 name = service.get('name', identifier)
                 print(f"\nProcessing service: {name} ({identifier}) at {scope_label}")
                 
-                yaml_content = self.source_client.get_service_yaml(
+                # Get service data to detect storage type
+                service_data = self.source_client.get_service_data(
                     identifier, org_id, project_id
                 )
                 
-                if not yaml_content:
-                    print(f"  Failed to get YAML for service {name}")
+                if not service_data:
+                    print(f"  Failed to get data for service {name}")
                     results['failed'] += 1
                     continue
                 
-                # Save exported YAML with scope in filename
+                # Detect if service is GitX or Inline
+                is_gitx = self.source_client.is_gitx_resource(service_data)
+                storage_type = "GitX" if is_gitx else "Inline"
+                print(f"  Service storage type: {storage_type}")
+                
+                # Save exported data
                 scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
-                export_file = self.export_dir / f"service_{identifier}{scope_suffix}.yaml"
-                export_file.write_text(yaml_content)
-                print(f"  Exported YAML to {export_file}")
+                
+                yaml_content = None
+                git_details = None
+                
+                if is_gitx:
+                    # GitX: Get git details for import
+                    git_details = service_data.get('gitDetails', {})
+                    if not git_details:
+                        print(f"  Failed to get git details for GitX service {name}")
+                        results['failed'] += 1
+                        continue
+                    # Also get YAML for export
+                    yaml_content = service_data.get('yaml', '')
+                    export_file = self.export_dir / f"service_{identifier}{scope_suffix}.yaml"
+                    if yaml_content:
+                        export_file.write_text(yaml_content)
+                        print(f"  Exported YAML to {export_file}")
+                else:
+                    # Inline: Get YAML content for import
+                    yaml_content = service_data.get('yaml', '')
+                    if not yaml_content:
+                        print(f"  Failed to get YAML for inline service {name}")
+                        results['failed'] += 1
+                        continue
+                    export_file = self.export_dir / f"service_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(yaml_content)
+                    print(f"  Exported YAML to {export_file}")
                 
                 # Import to destination (skip in dry-run mode)
                 if self.dry_run:
-                    print(f"  [DRY RUN] Would import service to destination account")
+                    if is_gitx:
+                        print(f"  [DRY RUN] Would import service (GitX) from git location")
+                    else:
+                        print(f"  [DRY RUN] Would import service (Inline) with YAML content")
                     results['success'] += 1
                 else:
                     if self.dest_client.import_service_yaml(
-                        yaml_content, org_id, project_id
+                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
                     ):
                         results['success'] += 1
                     else:
@@ -894,28 +1064,61 @@ class HarnessMigrator:
                 name = pipeline.get('name', identifier)
                 print(f"\nProcessing pipeline: {name} ({identifier}) at {scope_label}")
                 
-                yaml_content = self.source_client.get_pipeline_yaml(
+                # Get pipeline data to detect storage type
+                pipeline_data = self.source_client.get_pipeline_data(
                     identifier, org_id, project_id
                 )
                 
-                if not yaml_content:
-                    print(f"  Failed to get YAML for pipeline {name}")
+                if not pipeline_data:
+                    print(f"  Failed to get data for pipeline {name}")
                     results['failed'] += 1
                     continue
                 
-                # Save exported YAML with scope in filename
+                # Detect if pipeline is GitX or Inline
+                is_gitx = self.source_client.is_gitx_resource(pipeline_data)
+                storage_type = "GitX" if is_gitx else "Inline"
+                print(f"  Pipeline storage type: {storage_type}")
+                
+                # Save exported data
                 scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
-                export_file = self.export_dir / f"pipeline_{identifier}{scope_suffix}.yaml"
-                export_file.write_text(yaml_content)
-                print(f"  Exported YAML to {export_file}")
+                
+                yaml_content = None
+                git_details = None
+                
+                if is_gitx:
+                    # GitX: Get git details for import
+                    git_details = pipeline_data.get('gitDetails', {})
+                    if not git_details:
+                        print(f"  Failed to get git details for GitX pipeline {name}")
+                        results['failed'] += 1
+                        continue
+                    # Also get YAML for export
+                    yaml_content = pipeline_data.get('yamlPipeline', '')
+                    export_file = self.export_dir / f"pipeline_{identifier}{scope_suffix}.yaml"
+                    if yaml_content:
+                        export_file.write_text(yaml_content)
+                        print(f"  Exported YAML to {export_file}")
+                else:
+                    # Inline: Get YAML content for import
+                    yaml_content = pipeline_data.get('yamlPipeline', '')
+                    if not yaml_content:
+                        print(f"  Failed to get YAML for inline pipeline {name}")
+                        results['failed'] += 1
+                        continue
+                    export_file = self.export_dir / f"pipeline_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(yaml_content)
+                    print(f"  Exported YAML to {export_file}")
                 
                 # Import to destination (skip in dry-run mode)
                 if self.dry_run:
-                    print(f"  [DRY RUN] Would import pipeline to destination account")
+                    if is_gitx:
+                        print(f"  [DRY RUN] Would import pipeline (GitX) from git location")
+                    else:
+                        print(f"  [DRY RUN] Would import pipeline (Inline) with YAML content")
                     results['success'] += 1
                 else:
                     if self.dest_client.import_pipeline_yaml(
-                        yaml_content, org_id, project_id
+                        yaml_content=yaml_content, git_details=git_details, org_identifier=org_id, project_identifier=project_id
                     ):
                         results['success'] += 1
                     else:
