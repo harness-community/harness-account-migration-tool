@@ -239,7 +239,9 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {})
+            # Extract from nested 'pipeline' key if present, fallback to 'data' itself
+            pipeline_data = data.get('data', {}).get('pipeline', data.get('data', {}))
+            return pipeline_data
         else:
             print(f"Failed to get pipeline data: {response.status_code} - {response.text}")
             return None
@@ -311,7 +313,9 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {})
+            # Extract from nested 'service' key if present, fallback to 'data' itself
+            service_data = data.get('data', {}).get('service', data.get('data', {}))
+            return service_data
         else:
             print(f"Failed to get service data: {response.status_code} - {response.text}")
             return None
@@ -381,7 +385,9 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {})
+            # Extract from nested 'environment' key if present, fallback to 'data' itself
+            env_data = data.get('data', {}).get('environment', data.get('data', {}))
+            return env_data
         else:
             print(f"Failed to get environment data: {response.status_code} - {response.text}")
             return None
@@ -571,7 +577,9 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            return data.get('data', {})
+            # Extract from nested 'infrastructure' key if present, fallback to 'data' itself
+            infra_data = data.get('data', {}).get('infrastructure', data.get('data', {}))
+            return infra_data
         else:
             print(f"Failed to get infrastructure data: {response.status_code} - {response.text}")
             return None
@@ -978,8 +986,10 @@ class HarnessMigrator:
             services = self.source_client.list_services(org_id, project_id)
             
             for service in services:
-                identifier = service.get('identifier', '')
-                name = service.get('name', identifier)
+                # Extract service data from nested structure if present
+                service_item = service.get('service', service)
+                identifier = service_item.get('identifier', '')
+                name = service_item.get('name', identifier)
                 print(f"\nProcessing service: {name} ({identifier}) at {scope_label}")
                 
                 # Get service data to detect storage type
@@ -1060,8 +1070,10 @@ class HarnessMigrator:
             pipelines = self.source_client.list_pipelines(org_id, project_id)
             
             for pipeline in pipelines:
-                identifier = pipeline.get('identifier', '')
-                name = pipeline.get('name', identifier)
+                # Extract pipeline data from nested structure if present
+                pipeline_item = pipeline.get('pipeline', pipeline)
+                identifier = pipeline_item.get('identifier', '')
+                name = pipeline_item.get('name', identifier)
                 print(f"\nProcessing pipeline: {name} ({identifier}) at {scope_label}")
                 
                 # Get pipeline data to detect storage type
