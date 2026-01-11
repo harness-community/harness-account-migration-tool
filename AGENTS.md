@@ -77,20 +77,37 @@ This is a Python-based tool for migrating Harness account resources from one Har
 - **Automatic Detection**: The script detects storage method using `is_gitx_resource()` method
 - **Detection Logic**:
   - Checks `storeType` field (REMOTE = GitX, INLINE = Inline)
-  - Checks for `gitDetails` field
+  - Checks for `gitDetails` or `entityGitDetails` field
   - Checks for git-related fields (`repo`, `branch`)
   - Defaults to Inline if no indicators found
 - **Export Format**: Resources are exported as YAML files (for both GitX and Inline)
-- **Import Process for Inline Resources**: 
-  1. Get resource data from source account
-  2. Extract YAML content from resource data
-  3. Export YAML to file for backup
-  4. Import to destination using YAML import API with YAML content
-- **Import Process for GitX Resources**:
-  1. Get resource data from source account
-  2. Extract git details (`gitDetails`) from resource data
-  3. Export YAML to file for backup (if available)
-  4. Import to destination using YAML import API with git details
+- **Migration Process for Inline Resources**: 
+  1. Get resource data from source account (using `get_*_data()` method)
+  2. Extract YAML content from resource data (from `yaml` field, or `yamlPipeline` for pipelines)
+  3. Extract additional metadata (identifier, type, name, etc.) from resource data
+  4. Export YAML to file for backup
+  5. Create in destination using **create API** (`POST /ng/api/{resource}`) with JSON body containing:
+     - `yaml`: The YAML content
+     - `accountId`: Account identifier
+     - `identifier`: Resource identifier (for environments)
+     - `type`: Resource type (for environments)
+     - `name`: Resource name (for environments)
+     - `orgIdentifier` / `organizationId`: Organization identifier (if applicable)
+     - `projectIdentifier` / `projectId`: Project identifier (if applicable)
+- **Migration Process for GitX Resources**:
+  1. Get resource data from source account (using `get_*_data()` method)
+  2. Extract git details from `entityGitDetails` or `gitDetails` field
+  3. Extract additional metadata (identifier, connectorRef, etc.) from resource data
+  4. Export YAML to file for backup (if available)
+  5. Import to destination using **import API** (`POST /ng/api/{resource}/import`) with **query parameters only** (no request body):
+     - `accountIdentifier`: Account identifier (required)
+     - `{resource}Identifier`: Resource identifier (required for environments)
+     - `orgIdentifier`: Organization identifier (if applicable)
+     - `projectIdentifier`: Project identifier (if applicable)
+     - `connectorRef`: Connector reference (for environments, if present in source)
+     - `repoName`: Repository name (from git details)
+     - `branch`: Branch name (from git details)
+     - `filePath`: File path (from git details)
 
 ## Scope Handling
 
@@ -235,22 +252,26 @@ Exported files include scope information:
 ### Environments
 - `GET /ng/api/environmentsV2` - List environments
 - `GET /ng/api/environmentsV2/{identifier}` - Get environment
-- `POST /ng/api/environmentsV2/import` - Import environment (supports YAML content for inline, or git details for GitX)
+- `POST /ng/api/environmentsV2` - Create environment (for inline resources, JSON body with yaml, identifier, type, name, etc.)
+- `POST /ng/api/environmentsV2/import` - Import environment from GitX (query parameters only: accountIdentifier, environmentIdentifier, connectorRef, repoName, branch, filePath)
 
 ### Infrastructures
 - `GET /ng/api/infrastructures` - List infrastructures
-- `GET /ng/api/infrastructures/{identifier}` - Get infrastructure
-- `POST /ng/api/infrastructures/import` - Import infrastructure (supports YAML content for inline, or git details for GitX)
+- `GET /ng/api/infrastructures/{identifier}` - Get infrastructure (requires environmentIdentifier parameter)
+- `POST /ng/api/infrastructures` - Create infrastructure (for inline resources, JSON body with yaml, accountId, etc.)
+- `POST /ng/api/infrastructures/import` - Import infrastructure from GitX (query parameters only: accountIdentifier, repoName, branch, filePath)
 
 ### Services
 - `GET /ng/api/servicesV2` - List services
 - `GET /ng/api/servicesV2/{identifier}` - Get service
-- `POST /ng/api/servicesV2/import` - Import service (supports YAML content for inline, or git details for GitX)
+- `POST /ng/api/servicesV2` - Create service (for inline resources, JSON body with yaml, accountId, etc.)
+- `POST /ng/api/servicesV2/import` - Import service from GitX (query parameters only: accountIdentifier, repoName, branch, filePath)
 
 ### Pipelines
 - `POST /pipeline/api/pipelines/list` - List pipelines
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
-- `POST /pipeline/api/pipelines/import-pipeline` - Import pipeline (supports YAML content for inline, or git details for GitX)
+- `POST /pipeline/api/pipelines` - Create pipeline (for inline resources, JSON body with yaml, accountId, etc.)
+- `POST /pipeline/api/pipelines/import-pipeline` - Import pipeline from GitX (query parameters only: accountIdentifier, repoName, branch, filePath)
 
 ## Common Patterns
 
@@ -267,11 +288,12 @@ Exported files include scope information:
        # ... implementation
    ```
 
-2. Add get data method (for detection):
+2. Add get data method (for detection and data extraction):
    ```python
    def get_new_resource_data(self, identifier, org_id=None, project_id=None):
        endpoint = f"/ng/api/new-resource/{identifier}"
        # ... implementation - returns full resource data dict
+       # IMPORTANT: Extract from nested key if present (e.g., data.get('data', {}).get('newResource', data.get('data', {})))
    ```
 
 3. Add get YAML method (wrapper around get_data):
@@ -283,19 +305,68 @@ Exported files include scope information:
        return None
    ```
 
-4. Add import method (supports both YAML content and git details):
+4. Add create method (for inline resources):
    ```python
-   def import_new_resource_yaml(self, yaml_content=None, git_details=None, org_id=None, project_id=None):
-       endpoint = "/ng/api/new-resource/import"
-       data = {}
-       if yaml_content:
-           data['yaml'] = yaml_content
-       if git_details:
-           data['gitDetails'] = git_details
+   def create_new_resource(self, yaml_content, identifier=None, type=None, name=None, org_id=None, project_id=None):
+       endpoint = "/ng/api/new-resource"
+       params = {}
+       if org_id:
+           params['orgIdentifier'] = org_id
+       if project_id:
+           params['projectIdentifier'] = project_id
+       
+       # Build JSON payload with YAML content and identifiers
+       data = {
+           'yaml': yaml_content,
+           'accountId': self.account_id
+       }
+       # Add resource-specific fields (identifier, type, name) if needed
+       if identifier:
+           data['identifier'] = identifier
+       if type:
+           data['type'] = type
+       if name:
+           data['name'] = name
+       if org_id:
+           data['organizationId'] = org_id  # or 'orgIdentifier' depending on API
+       if project_id:
+           data['projectId'] = project_id  # or 'projectIdentifier' depending on API
+       
+       response = self._make_request('POST', endpoint, params=params, data=data)
        # ... implementation
    ```
 
-5. Add migration method to `HarnessMigrator`:
+5. Add import method (for GitX resources only - uses query parameters, not request body):
+   ```python
+   def import_new_resource_yaml(self, git_details, resource_identifier=None, connector_ref=None, org_id=None, project_id=None):
+       endpoint = "/ng/api/new-resource/import"
+       params = {
+           'accountIdentifier': self.account_id
+       }
+       # Add resource identifier if required by API
+       if resource_identifier:
+           params['newResourceIdentifier'] = resource_identifier
+       if org_id:
+           params['orgIdentifier'] = org_id
+       if project_id:
+           params['projectIdentifier'] = project_id
+       if connector_ref:
+           params['connectorRef'] = connector_ref
+       
+       # Add git details fields to query parameters (required: repoName, branch, filePath)
+       if 'repoName' in git_details:
+           params['repoName'] = git_details['repoName']
+       if 'branch' in git_details:
+           params['branch'] = git_details['branch']
+       if 'filePath' in git_details:
+           params['filePath'] = git_details['filePath']
+       
+       # No data body for GitX import
+       response = self._make_request('POST', endpoint, params=params, data=None)
+       # ... implementation
+   ```
+
+6. Add migration method to `HarnessMigrator`:
    ```python
    def migrate_new_resources(self):
        scopes = self._get_all_scopes()
@@ -305,24 +376,115 @@ Exported files include scope information:
                # Extract from nested key if present (e.g., resource.get('newResource', resource))
                resource_item = resource.get('newResource', resource)
                identifier = resource_item.get('identifier', '')
+               name = resource_item.get('name', identifier)
                
                # Get full resource data
                resource_data = self.source_client.get_new_resource_data(identifier, org_id, project_id)
                
+               if not resource_data:
+                   print(f"  Failed to get data for {name}")
+                   results['failed'] += 1
+                   continue
+               
                # Detect storage type
                is_gitx = self.source_client.is_gitx_resource(resource_data)
+               storage_type = "GitX" if is_gitx else "Inline"
+               
+               # Export YAML for backup
+               yaml_content = resource_data.get('yaml', '')  # or 'yamlPipeline' for pipelines
+               # ... export logic
                
                if is_gitx:
-                   # GitX: Use git details
-                   git_details = resource_data.get('gitDetails', {})
-                   # Import with git details
+                   # GitX: Extract git details and use import endpoint
+                   git_details = resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})
+                   if not git_details:
+                       print(f"  Failed to get git details for GitX {name}")
+                       results['failed'] += 1
+                       continue
+                   connector_ref = resource_data.get('connectorRef')  # If applicable
+                   # Import with git details via query parameters
+                   if self.dest_client.import_new_resource_yaml(
+                       git_details=git_details, resource_identifier=identifier,
+                       connector_ref=connector_ref, org_id=org_id, project_id=project_id
+                   ):
+                       results['success'] += 1
+                   else:
+                       results['failed'] += 1
                else:
-                   # Inline: Use YAML content
-                   yaml_content = resource_data.get('yaml', '')
-                   # Import with YAML content
+                   # Inline: Extract YAML and metadata, use create endpoint
+                   if not yaml_content:
+                       print(f"  Failed to get YAML for inline {name}")
+                       results['failed'] += 1
+                       continue
+                   resource_type = resource_data.get('type', 'DefaultType')  # If applicable
+                   # Create with YAML content and metadata via JSON body
+                   if self.dest_client.create_new_resource(
+                       yaml_content=yaml_content, identifier=identifier, type=resource_type, name=name,
+                       org_id=org_id, project_id=project_id
+                   ):
+                       results['success'] += 1
+                   else:
+                       results['failed'] += 1
    ```
 
-6. Add to `migrate_all()` and command-line choices
+7. Add to `migrate_all()` and command-line choices
+
+### Important Implementation Details for Create Methods
+
+**For Inline Resources (create endpoints)**:
+- Use `POST /ng/api/{resource}` endpoint (not the import endpoint)
+- Send JSON body with `Content-Type: application/json` (handled automatically by `_make_request`)
+- Required fields in JSON body:
+  - `yaml`: The YAML content as a string
+  - `accountId`: Account identifier
+  - Additional fields vary by resource type:
+    - **Environments**: Requires `identifier`, `type`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
+    - **Infrastructures, Services, Pipelines**: Require `organizationId`/`orgIdentifier`, `projectId`/`projectIdentifier` in JSON body (check API docs for exact field names)
+    - Note: Some resources may have different field name conventions (e.g., `organizationId` vs `orgIdentifier`)
+
+**Resource-Specific Notes**:
+- **Environments**: Most complex - requires identifier, type, and name in addition to YAML
+- **Infrastructures**: Require `environmentIdentifier` when getting data, but not when creating
+- **Services**: Standard pattern - YAML + accountId + org/project identifiers
+- **Pipelines**: Use `yamlPipeline` field name when extracting YAML from response data
+
+### Important Implementation Details for Import Methods (GitX)
+
+**For GitX Resources (import endpoints)**:
+- Use `POST /ng/api/{resource}/import` endpoint
+- **No request body** - all data sent as query parameters
+- Required query parameters:
+  - `accountIdentifier`: Account identifier (always required)
+  - `{resource}Identifier`: Resource identifier (required for environments)
+  - `repoName`: Repository name (from git details)
+  - `branch`: Branch name (from git details)
+  - `filePath`: File path (from git details)
+- Optional query parameters:
+  - `orgIdentifier`: Organization identifier (if applicable)
+  - `projectIdentifier`: Project identifier (if applicable)
+  - `connectorRef`: Connector reference (for environments, if present in source)
+
+### Extracting Nested Data from Get Responses
+
+When implementing `get_*_data()` methods, always check for nested keys in the response:
+```python
+def get_new_resource_data(self, identifier, org_id=None, project_id=None):
+    endpoint = f"/ng/api/new-resource/{identifier}"
+    response = self._make_request('GET', endpoint, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        # Extract from nested key if present, fallback to 'data' itself
+        resource_data = data.get('data', {}).get('newResource', data.get('data', {}))
+        return resource_data
+    return None
+```
+
+Common nested keys:
+- Environments: `data.environment`
+- Services: `data.service`
+- Projects: `data.project`
+- Organizations: `data.organization`
+- Connectors: `data.connector` (or directly in `data`)
 
 #### Pattern for Extracting Nested Data from List Responses:
 
@@ -337,14 +499,23 @@ for item in list_response:
 
 ### Handling Special Cases
 
-- **Nested Data Extraction**: Many list APIs return resources nested under a key matching the resource name:
+- **Nested Data Extraction in List Responses**: Many list APIs return resources nested under a key matching the resource name:
   - **Connectors**: Extract from `connector` key in list response: `connector.get('connector', connector)`
   - **Projects**: Extract from `project` key in list response: `project.get('project', project)`
   - **Organizations**: Extract from `organization` key in list response: `org.get('organization', org)`
   - **Environments**: Extract from `environment` key in list response: `env.get('environment', env)`
+  - **Services**: Extract from `service` key in list response: `service.get('service', service)`
+  - **Pipelines**: Extract from `pipeline` key in list response: `pipeline.get('pipeline', pipeline)`
   - Always use fallback to the item itself if the key doesn't exist
+- **Nested Data Extraction in Get Responses**: When getting individual resource data, extract from nested structure:
+  - Use pattern: `data.get('data', {}).get('resourceName', data.get('data', {}))`
+  - Example: `data.get('data', {}).get('environment', data.get('data', {}))`
 - **Infrastructures**: Require `environmentIdentifier` parameter when getting individual infrastructure data
 - **Pipelines**: YAML field is named `yamlPipeline` instead of `yaml` in the response
+- **Git Details Field Names**: 
+  - Environments and Services use `entityGitDetails` field
+  - Other resources may use `gitDetails` field
+  - Check both when extracting: `resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})`
 
 ### Detecting GitX vs Inline Storage
 
