@@ -89,11 +89,12 @@ This is a Python-based tool for migrating Harness account resources from one Har
   5. Create in destination using **create API** (`POST /ng/api/{resource}`) with JSON body containing:
      - `yaml`: The YAML content
      - `accountId`: Account identifier
-     - `identifier`: Resource identifier (for environments)
-     - `type`: Resource type (for environments)
-     - `name`: Resource name (for environments)
-     - `orgIdentifier` / `organizationId`: Organization identifier (if applicable)
-     - `projectIdentifier` / `projectId`: Project identifier (if applicable)
+     - `identifier`: Resource identifier (required for environments and services)
+     - `type`: Resource type (required for environments only)
+     - `name`: Resource name (required for environments and services)
+     - `orgIdentifier`: Organization identifier (always included, may be None)
+     - `projectIdentifier`: Project identifier (always included, may be None)
+     - Additional resource-specific fields (e.g., `environmentIdentifier` for infrastructures)
 - **Migration Process for GitX Resources**:
   1. Get resource data from source account (using `get_*_data()` method)
   2. Extract git details from `entityGitDetails` or `gitDetails` field
@@ -264,8 +265,8 @@ Exported files include scope information:
 ### Services
 - `GET /ng/api/servicesV2` - List services
 - `GET /ng/api/servicesV2/{identifier}` - Get service
-- `POST /ng/api/servicesV2` - Create service (for inline resources, JSON body with yaml, accountId, etc.)
-- `POST /ng/api/servicesV2/import` - Import service from GitX (query parameters only: accountIdentifier, repoName, branch, filePath)
+- `POST /ng/api/servicesV2` - Create service (for inline resources, JSON body with yaml, identifier, name, accountId, orgIdentifier, projectIdentifier)
+- `POST /ng/api/servicesV2/import` - Import service from GitX (query parameters only: accountIdentifier, serviceIdentifier, connectorRef, repoName, branch, filePath)
 
 ### Pipelines
 - `POST /pipeline/api/pipelines/list` - List pipelines
@@ -377,7 +378,7 @@ for item in list_response:
 
 4. Add create method (for inline resources):
    ```python
-   def create_new_resource(self, yaml_content, identifier=None, type=None, name=None, org_id=None, project_id=None):
+   def create_new_resource(self, yaml_content, identifier, name, type=None, org_id=None, project_id=None):
        endpoint = "/ng/api/new-resource"
        params = {}
        if org_id:
@@ -388,19 +389,16 @@ for item in list_response:
        # Build JSON payload with YAML content and identifiers
        data = {
            'yaml': yaml_content,
-           'accountId': self.account_id
+           'accountId': self.account_id,
+           'identifier': identifier,
+           'name': name,
+           'orgIdentifier': org_id,  # Always include, may be None
+           'projectIdentifier': project_id  # Always include, may be None
        }
-       # Add resource-specific fields (identifier, type, name) if needed
-       if identifier:
-           data['identifier'] = identifier
+       # Add resource-specific fields if needed (e.g., type for environments)
        if type:
            data['type'] = type
-       if name:
-           data['name'] = name
-       if org_id:
-           data['organizationId'] = org_id  # or 'orgIdentifier' depending on API
-       if project_id:
-           data['projectId'] = project_id  # or 'projectIdentifier' depending on API
+       # Add additional resource-specific fields (e.g., environmentIdentifier for infrastructures)
        
        response = self._make_request('POST', endpoint, params=params, data=data)
        # ... implementation
@@ -487,10 +485,13 @@ for item in list_response:
                        print(f"  Failed to get YAML for inline {name}")
                        results['failed'] += 1
                        continue
-                   resource_type = resource_data.get('type', 'DefaultType')  # If applicable
+                   # Extract resource-specific fields (e.g., type for environments)
+                   resource_type = resource_data.get('type')  # If applicable (e.g., for environments)
                    # Create with YAML content and metadata via JSON body
+                   # Most resources require identifier and name; some may require additional fields
                    if self.dest_client.create_new_resource(
-                       yaml_content=yaml_content, identifier=identifier, type=resource_type, name=name,
+                       yaml_content=yaml_content, identifier=identifier, name=name,
+                       type=resource_type,  # Pass None if not applicable
                        org_id=org_id, project_id=project_id
                    ):
                        results['success'] += 1
@@ -510,14 +511,17 @@ for item in list_response:
   - `accountId`: Account identifier
   - Additional fields vary by resource type:
     - **Environments**: Requires `identifier`, `type`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
-    - **Infrastructures, Services, Pipelines**: Require `organizationId`/`orgIdentifier`, `projectId`/`projectIdentifier` in JSON body (check API docs for exact field names)
+    - **Services**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
+    - **Infrastructures**: Requires `environmentIdentifier` in JSON body (and query params), plus `orgIdentifier`, `projectIdentifier` (check API docs for exact field names)
+    - **Pipelines**: May require `organizationId`/`orgIdentifier`, `projectId`/`projectIdentifier` in JSON body (check API docs for exact field names)
     - Note: Some resources may have different field name conventions (e.g., `organizationId` vs `orgIdentifier`)
 
 **Resource-Specific Notes**:
-- **Environments**: Most complex - requires identifier, type, and name in addition to YAML
-- **Infrastructures**: Require `environmentIdentifier` when getting data, but not when creating
-- **Services**: Standard pattern - YAML + accountId + org/project identifiers
+- **Environments**: Most complex - requires `identifier`, `type`, and `name` in addition to YAML
+- **Services**: Requires `identifier` and `name` in addition to YAML (similar to environments but without `type`)
+- **Infrastructures**: Require `environmentIdentifier` in both query parameters and JSON body when creating
 - **Pipelines**: Use `yamlPipeline` field name when extracting YAML from response data
+- **General Pattern**: Most inline resources require `identifier` and `name` fields extracted from source resource data
 
 ### Important Implementation Details for Import Methods (GitX)
 
