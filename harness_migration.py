@@ -447,27 +447,35 @@ class HarnessAPIClient:
             print(f"Failed to get connector YAML: {response.status_code} - {response.text}")
             return None
     
-    def import_connector_yaml(self, yaml_content: str, org_identifier: Optional[str] = None,
+    def create_connector_yaml(self, yaml_content: str, org_identifier: Optional[str] = None,
                              project_identifier: Optional[str] = None) -> bool:
-        """Import connector from YAML"""
-        endpoint = "/ng/api/connectors/import"
+        """Create connector from YAML document"""
+        endpoint = "/ng/api/connectors"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        data = {
-            'yaml': yaml_content
-        }
+        # Connectors are created by passing YAML directly in the request body
+        # The Content-Type should be text/yaml or application/yaml
+        headers = self.headers.copy()
+        headers['Content-Type'] = 'text/yaml'
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        url = f"{self.base_url}{endpoint}"
+        params['accountIdentifier'] = self.account_id
         
-        if response.status_code in [200, 201]:
-            print(f"Successfully imported connector")
-            return True
-        else:
-            print(f"Failed to import connector: {response.status_code} - {response.text}")
+        try:
+            response = requests.post(url, headers=headers, params=params, data=yaml_content)
+            
+            if response.status_code in [200, 201]:
+                print(f"Successfully created connector")
+                return True
+            else:
+                print(f"Failed to create connector: {response.status_code} - {response.text}")
+                return False
+        except requests.exceptions.RequestException as e:
+            print(f"Request error: {e}")
             return False
     
     def list_infrastructures(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -704,12 +712,12 @@ class HarnessMigrator:
                 export_file.write_text(yaml_content)
                 print(f"  Exported YAML to {export_file}")
                 
-                # Import to destination (skip in dry-run mode)
+                # Create connector in destination (skip in dry-run mode)
                 if self.dry_run:
-                    print(f"  [DRY RUN] Would import connector to destination account")
+                    print(f"  [DRY RUN] Would create connector to destination account")
                     results['success'] += 1
                 else:
-                    if self.dest_client.import_connector_yaml(
+                    if self.dest_client.create_connector_yaml(
                         yaml_content, org_id, project_id
                     ):
                         results['success'] += 1
