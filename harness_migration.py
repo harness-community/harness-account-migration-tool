@@ -800,6 +800,170 @@ class HarnessAPIClient:
         else:
             print(f"Failed to import infrastructure from GitX: {response.status_code} - {response.text}")
             return False
+    
+    def list_templates(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all templates"""
+        endpoint = "/template/api/templates/list-metadata"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        params['templateListType'] = 'LastUpdated'
+        params['page'] = 0
+        params['size'] = 1000
+        params['sort'] = 'lastUpdatedAt,DESC'
+        params['checkReferenced'] = 'true'
+        # routingId is typically the account identifier
+        params['routingId'] = self.account_id
+        
+        response = self._make_request('POST', endpoint, params=params, data={
+            'filterType': 'Template'
+        })
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('data', {}).get('content', [])
+        else:
+            print(f"Failed to list templates: {response.status_code} - {response.text}")
+            return []
+    
+    def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
+                              project_identifier: Optional[str] = None) -> List[str]:
+        """Get all versions of a template"""
+        endpoint = f"/ng/api/templates/{template_identifier}/versions"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            versions = data.get('data', {}).get('versions', [])
+            # Extract version strings from the list
+            version_list = []
+            for version in versions:
+                if isinstance(version, dict):
+                    version_str = version.get('version', version.get('versionLabel', ''))
+                else:
+                    version_str = str(version)
+                if version_str:
+                    version_list.append(version_str)
+            return version_list
+        else:
+            print(f"Failed to get template versions: {response.status_code} - {response.text}")
+            return []
+    
+    def get_template_data(self, template_identifier: str, version: str,
+                         org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get template data for a specific version (for both GitX and Inline detection)"""
+        endpoint = f"/ng/api/templates/{template_identifier}"
+        params = {
+            'version': version
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Extract from nested 'template' key if present, fallback to 'data' itself
+            template_data = data.get('data', {}).get('template', data.get('data', {}))
+            return template_data
+        else:
+            print(f"Failed to get template data: {response.status_code} - {response.text}")
+            return None
+    
+    def get_template_yaml(self, template_identifier: str, version: str,
+                         org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get template YAML for a specific version"""
+        template_data = self.get_template_data(template_identifier, version, org_identifier, project_identifier)
+        if template_data:
+            # Templates may use 'yaml' or 'templateYaml' field
+            return template_data.get('yaml', '') or template_data.get('templateYaml', '')
+        return None
+    
+    def create_template(self, yaml_content: str, identifier: str, name: str, version: str,
+                       org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                       tags: Optional[Dict[str, str]] = None) -> bool:
+        """Create template from YAML content (for inline resources)"""
+        endpoint = "/ng/api/templates"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with YAML content and identifiers
+        data = {
+            'yaml': yaml_content,
+            'accountId': self.account_id,
+            'identifier': identifier,
+            'name': name,
+            'versionLabel': version,
+            'orgIdentifier': org_identifier,
+            'projectIdentifier': project_identifier
+        }
+        
+        # Add tags if provided
+        if tags:
+            data['tags'] = tags
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created template version {version}")
+            return True
+        else:
+            print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
+            return False
+    
+    def import_template_yaml(self, git_details: Dict, template_identifier: str, version: str,
+                            template_description: Optional[str] = None,
+                            org_identifier: Optional[str] = None,
+                            project_identifier: Optional[str] = None) -> bool:
+        """Import template from Git location (for GitX resources only)"""
+        endpoint = "/ng/api/templates/import"
+        params = {
+            'templateIdentifier': template_identifier,
+            'versionLabel': version
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
+        
+        # Add connector reference if present in git details
+        if 'connectorRef' in git_details:
+            params['connectorRef'] = git_details['connectorRef']
+        
+        # Build JSON body with template description (always include, even if empty)
+        data = {
+            'templateDescription': template_description if template_description else ''
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully imported template version {version} from GitX")
+            return True
+        else:
+            print(f"Failed to import template version {version} from GitX: {response.status_code} - {response.text}")
+            return False
 
 
 class HarnessMigrator:
@@ -1422,10 +1586,138 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_templates(self) -> Dict[str, Any]:
+        """Migrate templates at all scopes (account, org, project) - migrates all versions of each template"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Templates ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing templates at {scope_label} ---")
+            
+            templates = self.source_client.list_templates(org_id, project_id)
+            
+            for template in templates:
+                # Extract template data from nested structure if present
+                template_item = template.get('template', template)
+                identifier = template_item.get('identifier', '')
+                name = template_item.get('name', identifier)
+                print(f"\nProcessing template: {name} ({identifier}) at {scope_label}")
+                
+                # Get all versions for this template
+                versions = self.source_client.get_template_versions(identifier, org_id, project_id)
+                
+                if not versions:
+                    print(f"  No versions found for template {name}")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"  Found {len(versions)} version(s): {', '.join(versions)}")
+                
+                # Migrate each version
+                for version in versions:
+                    print(f"\n  Processing version: {version}")
+                    
+                    # Get template data for this version to detect storage type
+                    template_data = self.source_client.get_template_data(
+                        identifier, version, org_id, project_id
+                    )
+                    
+                    if not template_data:
+                        print(f"    Failed to get data for template {name} version {version}")
+                        results['failed'] += 1
+                        continue
+                    
+                    # Detect if template is GitX or Inline
+                    is_gitx = self.source_client.is_gitx_resource(template_data)
+                    storage_type = "GitX" if is_gitx else "Inline"
+                    print(f"    Template storage type: {storage_type}")
+                    
+                    # Save exported data
+                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    
+                    yaml_content = None
+                    git_details = None
+                    
+                    if is_gitx:
+                        # GitX: Get git details for import
+                        git_details = template_data.get('gitDetails', {}) or template_data.get('entityGitDetails', {})
+                        if not git_details:
+                            print(f"    Failed to get git details for GitX template {name} version {version}")
+                            results['failed'] += 1
+                            continue
+                        # Extract connector reference from template data if present
+                        connector_ref = template_data.get('connectorRef')
+                        if connector_ref:
+                            git_details['connectorRef'] = connector_ref
+                        # Also get YAML for export
+                        yaml_content = template_data.get('yaml', '') or template_data.get('templateYaml', '')
+                        export_file = self.export_dir / f"template_{identifier}_v{version}{scope_suffix}.yaml"
+                        if yaml_content:
+                            export_file.write_text(yaml_content)
+                            print(f"    Exported YAML to {export_file}")
+                    else:
+                        # Inline: Get YAML content for import
+                        yaml_content = template_data.get('yaml', '') or template_data.get('templateYaml', '')
+                        if not yaml_content:
+                            print(f"    Failed to get YAML for inline template {name} version {version}")
+                            results['failed'] += 1
+                            continue
+                        export_file = self.export_dir / f"template_{identifier}_v{version}{scope_suffix}.yaml"
+                        export_file.write_text(yaml_content)
+                        print(f"    Exported YAML to {export_file}")
+                    
+                    # Import to destination (skip in dry-run mode)
+                    if self.dry_run:
+                        if is_gitx:
+                            print(f"    [DRY RUN] Would import template version {version} (GitX) from git location")
+                        else:
+                            print(f"    [DRY RUN] Would create template version {version} (Inline) with YAML content")
+                        results['success'] += 1
+                    else:
+                        if is_gitx:
+                            # GitX: Use import endpoint with git details
+                            # Extract template description from template data
+                            template_description = template_data.get('description') or template_data.get('templateDescription')
+                            if self.dest_client.import_template_yaml(
+                                git_details=git_details, template_identifier=identifier, version=version,
+                                template_description=template_description,
+                                org_identifier=org_id, project_identifier=project_id
+                            ):
+                                results['success'] += 1
+                            else:
+                                results['failed'] += 1
+                        else:
+                            # Inline: Use create endpoint with YAML content
+                            # Extract tags from YAML document
+                            tags = None
+                            if yaml_content:
+                                try:
+                                    parsed_yaml = yaml.safe_load(yaml_content)
+                                    if parsed_yaml and isinstance(parsed_yaml, dict):
+                                        # Tags are typically at template.tags or directly at tags
+                                        tags = parsed_yaml.get('template', {}).get('tags') or parsed_yaml.get('tags')
+                                except Exception as e:
+                                    print(f"    Warning: Failed to parse YAML for tags: {e}")
+                            
+                            if self.dest_client.create_template(
+                                yaml_content=yaml_content, identifier=identifier, name=name, version=version,
+                                org_identifier=org_id, project_identifier=project_id, tags=tags
+                            ):
+                                results['success'] += 1
+                            else:
+                                results['failed'] += 1
+                    
+                    time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
-            resource_types = ['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines']
+            resource_types = ['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines', 'templates']
         
         all_results = {}
         
@@ -1449,6 +1741,9 @@ class HarnessMigrator:
         if 'services' in resource_types:
             all_results['services'] = self.migrate_services()
         
+        if 'templates' in resource_types:
+            all_results['templates'] = self.migrate_templates()
+
         if 'pipelines' in resource_types:
             all_results['pipelines'] = self.migrate_pipelines()
         
@@ -1462,8 +1757,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines'],
-                       default=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines'],
+                       choices=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
+                       default=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
