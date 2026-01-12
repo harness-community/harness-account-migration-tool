@@ -867,7 +867,7 @@ class HarnessAPIClient:
     def get_template_data(self, template_identifier: str, version: str,
                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
         """Get template data for a specific version (for both GitX and Inline detection)"""
-        endpoint = f"/ng/api/templates/{template_identifier}"
+        endpoint = f"/template/api/templates/{template_identifier}"
         params = {
             'version': version
         }
@@ -900,7 +900,7 @@ class HarnessAPIClient:
                        org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
                        tags: Optional[Dict[str, str]] = None) -> bool:
         """Create template from YAML content (for inline resources)"""
-        endpoint = "/ng/api/templates"
+        endpoint = "/template/api/templates"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
