@@ -901,34 +901,35 @@ class HarnessAPIClient:
                        tags: Optional[Dict[str, str]] = None) -> bool:
         """Create template from YAML content (for inline resources)"""
         endpoint = "/template/api/templates"
-        params = {}
+        params = {
+            'isNewTemplate': 'true',
+            'storeType': 'INLINE',
+            'comments': ''
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        # Build JSON payload with YAML content and identifiers
-        data = {
-            'yaml': yaml_content,
-            'accountId': self.account_id,
-            'identifier': identifier,
-            'name': name,
-            'versionLabel': version,
-            'orgIdentifier': org_identifier,
-            'projectIdentifier': project_identifier
-        }
+        # Templates are created by passing YAML directly in the request body
+        # The Content-Type should be application/yaml
+        headers = self.headers.copy()
+        headers['Content-Type'] = 'application/yaml'
         
-        # Add tags if provided
-        if tags:
-            data['tags'] = tags
+        url = f"{self.base_url}{endpoint}"
+        params['accountIdentifier'] = self.account_id
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
-        
-        if response.status_code in [200, 201]:
-            print(f"Successfully created template version {version}")
-            return True
-        else:
-            print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
+        try:
+            response = requests.post(url, headers=headers, params=params, data=yaml_content)
+            
+            if response.status_code in [200, 201]:
+                print(f"Successfully created template version {version}")
+                return True
+            else:
+                print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
+                return False
+        except requests.exceptions.RequestException as e:
+            print(f"Request error: {e}")
             return False
     
     def import_template_yaml(self, git_details: Dict, template_identifier: str, version: str,
