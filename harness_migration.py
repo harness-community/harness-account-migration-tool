@@ -299,10 +299,11 @@ class HarnessAPIClient:
             print(f"Failed to create pipeline: {response.status_code} - {response.text}")
             return False
     
-    def import_pipeline_yaml(self, git_details: Dict, org_identifier: Optional[str] = None,
+    def import_pipeline_yaml(self, git_details: Dict, pipeline_description: Optional[str] = None,
+                             org_identifier: Optional[str] = None,
                              project_identifier: Optional[str] = None) -> bool:
         """Import pipeline from Git location (for GitX resources only)"""
-        endpoint = "/pipeline/api/pipelines/import-pipeline"
+        endpoint = "/pipeline/api/pipelines/import"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
@@ -317,8 +318,16 @@ class HarnessAPIClient:
         if 'filePath' in git_details:
             params['filePath'] = git_details['filePath']
         
-        # No data body for GitX import
-        response = self._make_request('POST', endpoint, params=params, data=None)
+        # Add connector reference if present in git details
+        if 'connectorRef' in git_details:
+            params['connectorRef'] = git_details['connectorRef']
+        
+        # Build JSON body with pipeline description (always include, even if empty)
+        data = {
+            'pipelineDescription': pipeline_description if pipeline_description else ''
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported pipeline from GitX")
@@ -1348,6 +1357,10 @@ class HarnessMigrator:
                         print(f"  Failed to get git details for GitX pipeline {name}")
                         results['failed'] += 1
                         continue
+                    # Extract connector reference from pipeline data if present
+                    connector_ref = pipeline_data.get('connectorRef')
+                    if connector_ref:
+                        git_details['connectorRef'] = connector_ref
                     # Also get YAML for export
                     yaml_content = pipeline_data.get('yamlPipeline', '')
                     export_file = self.export_dir / f"pipeline_{identifier}{scope_suffix}.yaml"
@@ -1375,8 +1388,11 @@ class HarnessMigrator:
                 else:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
+                        # Extract pipeline description from pipeline data
+                        pipeline_description = pipeline_data.get('description') or pipeline_data.get('pipelineDescription')
                         if self.dest_client.import_pipeline_yaml(
-                            git_details=git_details, org_identifier=org_id, project_identifier=project_id
+                            git_details=git_details, pipeline_description=pipeline_description,
+                            org_identifier=org_id, project_identifier=project_id
                         ):
                             results['success'] += 1
                         else:
