@@ -933,15 +933,12 @@ class HarnessAPIClient:
             return False
     
     def import_template_yaml(self, git_details: Dict, template_identifier: str, version: str,
-                            template_description: Optional[str] = None,
+                            template_name: str, template_description: Optional[str] = None,
                             org_identifier: Optional[str] = None,
                             project_identifier: Optional[str] = None) -> bool:
         """Import template from Git location (for GitX resources only)"""
-        endpoint = "/ng/api/templates/import"
-        params = {
-            'templateIdentifier': template_identifier,
-            'versionLabel': version
-        }
+        endpoint = f"/template/api/templates/import/{template_identifier}"
+        params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -959,9 +956,14 @@ class HarnessAPIClient:
         if 'connectorRef' in git_details:
             params['connectorRef'] = git_details['connectorRef']
         
-        # Build JSON body with template description (always include, even if empty)
+        # Add isHarnessCodeRepo (default to false if not specified)
+        params['isHarnessCodeRepo'] = git_details.get('isHarnessCodeRepo', 'false')
+        
+        # Build JSON body with template description, version, and name
         data = {
-            'templateDescription': template_description if template_description else ''
+            'templateDescription': template_description if template_description else '',
+            'templateVersion': version,
+            'templateName': template_name
         }
         
         response = self._make_request('POST', endpoint, params=params, data=data)
@@ -1691,7 +1693,7 @@ class HarnessMigrator:
                             template_description = template_data.get('description') or template_data.get('templateDescription')
                             if self.dest_client.import_template_yaml(
                                 git_details=git_details, template_identifier=identifier, version=version,
-                                template_description=template_description,
+                                template_name=name, template_description=template_description,
                                 org_identifier=org_id, project_identifier=project_id
                             ):
                                 results['success'] += 1
