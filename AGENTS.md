@@ -86,29 +86,32 @@ This is a Python-based tool for migrating Harness account resources from one Har
   2. Extract YAML content from resource data (from `yaml` field, or `yamlPipeline` for pipelines)
   3. Extract additional metadata (identifier, type, name, etc.) from resource data
   4. Export YAML to file for backup
-  5. Create in destination using **create API** (`POST /ng/api/{resource}`) with JSON body containing:
-     - `yaml`: The YAML content
+  5. Create in destination using **create API** (`POST /ng/api/{resource}` or resource-specific endpoint) with JSON body containing:
+     - `yaml`: The YAML content (or `pipeline_yaml` for pipelines)
      - `accountId`: Account identifier
-     - `identifier`: Resource identifier (required for environments and services)
+     - `identifier`: Resource identifier (required for environments, services, and pipelines)
      - `type`: Resource type (required for environments only)
-     - `name`: Resource name (required for environments and services)
+     - `name`: Resource name (required for environments, services, and pipelines)
      - `orgIdentifier`: Organization identifier (always included, may be None)
      - `projectIdentifier`: Project identifier (always included, may be None)
-     - Additional resource-specific fields (e.g., `environmentIdentifier` for infrastructures)
+     - Additional resource-specific fields (e.g., `environmentIdentifier` for infrastructures, `tags` for pipelines)
 - **Migration Process for GitX Resources**:
   1. Get resource data from source account (using `get_*_data()` method)
   2. Extract git details from `entityGitDetails` or `gitDetails` field
   3. Extract additional metadata (identifier, connectorRef, etc.) from resource data
   4. Export YAML to file for backup (if available)
-  5. Import to destination using **import API** (`POST /ng/api/{resource}/import`) with **query parameters only** (no request body):
-     - `accountIdentifier`: Account identifier (required)
-     - `{resource}Identifier`: Resource identifier (required for environments)
-     - `orgIdentifier`: Organization identifier (if applicable)
-     - `projectIdentifier`: Project identifier (if applicable)
-     - `connectorRef`: Connector reference (for environments, if present in source)
-     - `repoName`: Repository name (from git details)
-     - `branch`: Branch name (from git details)
-     - `filePath`: File path (from git details)
+  5. Import to destination using **import API** (`POST /ng/api/{resource}/import` or resource-specific endpoint) with query parameters and optionally a JSON body:
+     - **Query parameters**:
+       - `accountIdentifier`: Account identifier (required for most resources)
+       - `{resource}Identifier`: Resource identifier (required for environments)
+       - `orgIdentifier`: Organization identifier (if applicable)
+       - `projectIdentifier`: Project identifier (if applicable)
+       - `connectorRef`: Connector reference (for environments and pipelines, if present in source)
+       - `repoName`: Repository name (from git details)
+       - `branch`: Branch name (from git details)
+       - `filePath`: File path (from git details)
+     - **JSON body** (for pipelines only):
+       - `pipelineDescription`: Pipeline description (always included, may be empty string)
 
 ## Scope Handling
 
@@ -271,8 +274,8 @@ Exported files include scope information:
 ### Pipelines
 - `POST /pipeline/api/pipelines/list` - List pipelines
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
-- `POST /pipeline/api/pipelines` - Create pipeline (for inline resources, JSON body with yaml, accountId, etc.)
-- `POST /pipeline/api/pipelines/import-pipeline` - Import pipeline from GitX (query parameters only: accountIdentifier, repoName, branch, filePath)
+- `POST /v1/orgs/{org}/projects/{project}/pipelines` - Create pipeline (for inline resources, JSON body with pipeline_yaml, identifier, name, accountId, orgIdentifier, projectIdentifier, tags)
+- `POST /pipeline/api/pipelines/import` - Import pipeline from GitX (query parameters: orgIdentifier, projectIdentifier, repoName, branch, filePath, connectorRef; JSON body: pipelineDescription)
 
 ## Common Patterns
 
@@ -513,23 +516,28 @@ for item in list_response:
     - **Environments**: Requires `identifier`, `type`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
     - **Services**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
     - **Infrastructures**: Requires `environmentIdentifier` in JSON body (and query params), plus `orgIdentifier`, `projectIdentifier` (check API docs for exact field names)
-    - **Pipelines**: May require `organizationId`/`orgIdentifier`, `projectId`/`projectIdentifier` in JSON body (check API docs for exact field names)
+    - **Pipelines**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body. Uses `pipeline_yaml` field (not `yaml`) for YAML content. Optionally includes `tags` field extracted from YAML document.
     - Note: Some resources may have different field name conventions (e.g., `organizationId` vs `orgIdentifier`)
 
 **Resource-Specific Notes**:
 - **Environments**: Most complex - requires `identifier`, `type`, and `name` in addition to YAML
 - **Services**: Requires `identifier` and `name` in addition to YAML (similar to environments but without `type`)
 - **Infrastructures**: Require `environmentIdentifier` in both query parameters and JSON body when creating
-- **Pipelines**: Use `yamlPipeline` field name when extracting YAML from response data
+- **Pipelines**: 
+  - Use `yamlPipeline` field name when extracting YAML from response data
+  - Use `pipeline_yaml` field name (not `yaml`) when sending YAML content in create API
+  - Extract `tags` from parsed YAML document (from `pipeline.tags` or root `tags` field) and include in create API
+  - Extract `description` or `pipelineDescription` from pipeline data for GitX imports
 - **General Pattern**: Most inline resources require `identifier` and `name` fields extracted from source resource data
 
 ### Important Implementation Details for Import Methods (GitX)
 
 **For GitX Resources (import endpoints)**:
-- Use `POST /ng/api/{resource}/import` endpoint
-- **No request body** - all data sent as query parameters
+- Use `POST /ng/api/{resource}/import` endpoint (or resource-specific endpoint like `/pipeline/api/pipelines/import`)
+- **Most resources**: All data sent as query parameters (no request body)
+- **Pipelines**: Uses both query parameters and JSON body
 - Required query parameters:
-  - `accountIdentifier`: Account identifier (always required)
+  - `accountIdentifier`: Account identifier (required for most resources, not for pipelines)
   - `{resource}Identifier`: Resource identifier (required for environments)
   - `repoName`: Repository name (from git details)
   - `branch`: Branch name (from git details)
@@ -537,7 +545,9 @@ for item in list_response:
 - Optional query parameters:
   - `orgIdentifier`: Organization identifier (if applicable)
   - `projectIdentifier`: Project identifier (if applicable)
-  - `connectorRef`: Connector reference (for environments, if present in source)
+  - `connectorRef`: Connector reference (for environments and pipelines, if present in source)
+- **Pipelines JSON body**:
+  - `pipelineDescription`: Pipeline description (always included, even if empty string)
 
 ### Extracting Nested Data from Get Responses
 
@@ -560,6 +570,7 @@ Common nested keys:
 - Projects: `data.project`
 - Organizations: `data.organization`
 - Connectors: `data.connector` (or directly in `data`)
+- Pipelines: `data.pipeline`
 
 #### Pattern for Extracting Nested Data from List Responses:
 
