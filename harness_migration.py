@@ -902,7 +902,7 @@ class HarnessAPIClient:
         """Create template from YAML content (for inline resources)"""
         endpoint = "/template/api/templates"
         params = {
-            'isNewTemplate': 'true',
+            'isNewTemplate': 'false',
             'storeType': 'INLINE',
             'comments': ''
         }
