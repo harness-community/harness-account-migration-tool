@@ -7,7 +7,7 @@ This is a Python-based tool for migrating Harness account resources from one Har
 ## Key Features
 
 - **Multi-scope Migration**: Migrates resources at account, organization, and project levels
-- **Multiple Resource Types**: Supports organizations, projects, connectors, environments, infrastructures, services, and pipelines
+- **Multiple Resource Types**: Supports organizations, projects, connectors, environments, infrastructures, services, pipelines, and templates
 - **YAML Import APIs**: Uses Harness "Import from YAML" APIs where available for reliable migration
 - **Direct API Creation**: Uses create APIs for organizations and projects (not YAML-based)
 - **Dry-run Mode**: Test migrations without making changes to destination account
@@ -72,7 +72,7 @@ This is a Python-based tool for migrating Harness account resources from one Har
 - **Data Extraction**: Extract from `connector` key in list response
 - **Note**: Connectors use create API, not import API
 
-### Other Resources (Environments, Infrastructures, Services, Pipelines)
+### Other Resources (Environments, Infrastructures, Services, Pipelines, Templates)
 - **Storage Method**: Can be GitX or Inline (varies by resource and account configuration)
 - **Automatic Detection**: The script detects storage method using `is_gitx_resource()` method
 - **Detection Logic**:
@@ -150,9 +150,10 @@ Resources are migrated in dependency order:
 4. **Environments** (fourth - may be referenced by infrastructures)
 5. **Infrastructures** (fifth - depend on environments)
 6. **Services** (sixth - may reference connectors and environments)
-7. **Pipelines** (last - may reference all other resources)
+7. **Templates** (seventh - may be referenced by pipelines and other resources)
+8. **Pipelines** (last - may reference all other resources)
 
-**Note**: Environments, infrastructures, services, and pipelines automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource.
+**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
 
 ## Dry-Run Mode
 
@@ -216,7 +217,9 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
 - All requests include `accountIdentifier` in query parameters
 - Authentication via `x-api-key` header
 - Content-Type: `application/json` (most endpoints)
-- **Exception**: Connector creation uses `Content-Type: text/yaml` with YAML content in request body
+- **Exceptions**: 
+  - Connector creation uses `Content-Type: text/yaml` with YAML content in request body
+  - Template creation uses `Content-Type: application/yaml` with raw YAML content in request body
 
 ### Error Handling
 - API errors are caught and logged
@@ -237,6 +240,7 @@ Exported files include scope information:
 - Account level: `resource_identifier_account.yaml`
 - Org level: `resource_identifier_org_ORG_ID.yaml`
 - Project level: `resource_identifier_org_ORG_ID_project_PROJECT_ID.yaml`
+- **Templates**: Include version in filename: `template_identifier_vVERSION_scope_suffix.yaml`
 
 ## API Endpoints Used
 
@@ -276,6 +280,20 @@ Exported files include scope information:
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
 - `POST /v1/orgs/{org}/projects/{project}/pipelines` - Create pipeline (for inline resources, JSON body with pipeline_yaml, identifier, name, accountId, orgIdentifier, projectIdentifier, tags)
 - `POST /pipeline/api/pipelines/import` - Import pipeline from GitX (query parameters: orgIdentifier, projectIdentifier, repoName, branch, filePath, connectorRef; JSON body: pipelineDescription)
+
+### Templates
+- **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
+- **Versioning**: Templates are versioned resources. Each template can have multiple versions, and all versions must be migrated.
+- **List Templates**: `POST /template/api/templates/list-metadata` (query parameters: routingId, accountIdentifier, templateListType, page, size, sort, checkReferenced; JSON body: filterType)
+- **Get Template Versions**: Uses same `list-metadata` endpoint with `templateIdentifiers` filter in JSON body (query parameters: routingId, accountIdentifier, module, templateListType, size)
+- **Get Template Data**: `GET /template/api/templates/{identifier}` (query parameters: versionLabel, orgIdentifier, projectIdentifier)
+- **Create Template**: `POST /template/api/templates` (for inline resources, query parameters: accountIdentifier, isNewTemplate, storeType, comments, orgIdentifier, projectIdentifier; Content-Type: application/yaml; body: raw YAML content)
+- **Import Template**: `POST /template/api/templates/import/{identifier}` (query parameters: accountIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath, orgIdentifier, projectIdentifier; JSON body: templateDescription, templateVersion, templateName)
+- `POST /template/api/templates/list-metadata` - List templates (query parameters: routingId, accountIdentifier, templateListType, page, size, sort, checkReferenced; JSON body: filterType)
+- `POST /template/api/templates/list-metadata` - Get template versions (query parameters: routingId, accountIdentifier, module, templateListType, size; JSON body: filterType, templateIdentifiers)
+- `GET /template/api/templates/{identifier}` - Get template data for specific version (query parameters: versionLabel, orgIdentifier, projectIdentifier)
+- `POST /template/api/templates` - Create template (for inline resources, query parameters: accountIdentifier, isNewTemplate, storeType, comments, orgIdentifier, projectIdentifier; Content-Type: application/yaml; body: raw YAML content)
+- `POST /template/api/templates/import/{identifier}` - Import template from GitX (query parameters: accountIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath, orgIdentifier, projectIdentifier; JSON body: templateDescription, templateVersion, templateName)
 
 ## Common Patterns
 
@@ -344,6 +362,7 @@ for item in list_response:
 - **Infrastructures**: `item.get('infrastructure', item)`
 - **Services**: `item.get('service', item)`
 - **Pipelines**: `item.get('pipeline', item)`
+- **Templates**: `item.get('template', item)` (note: template list responses may not use nested structure)
 - **Projects**: `item.get('project', item)`
 - **Organizations**: `item.get('organization', item)`
 
@@ -517,6 +536,7 @@ for item in list_response:
     - **Services**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
     - **Infrastructures**: Requires `environmentIdentifier` in JSON body (and query params), plus `orgIdentifier`, `projectIdentifier` (check API docs for exact field names)
     - **Pipelines**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body. Uses `pipeline_yaml` field (not `yaml`) for YAML content. Optionally includes `tags` field extracted from YAML document.
+    - **Templates**: Uses raw YAML content in request body (not JSON). Content-Type: `application/yaml`. Query parameters: `isNewTemplate`, `storeType`, `comments`. YAML content must include `identifier`, `name`, `versionLabel` in the YAML structure. Optionally includes `tags` extracted from YAML document.
     - Note: Some resources may have different field name conventions (e.g., `organizationId` vs `orgIdentifier`)
 
 **Resource-Specific Notes**:
@@ -528,6 +548,16 @@ for item in list_response:
   - Use `pipeline_yaml` field name (not `yaml`) when sending YAML content in create API
   - Extract `tags` from parsed YAML document (from `pipeline.tags` or root `tags` field) and include in create API
   - Extract `description` or `pipelineDescription` from pipeline data for GitX imports
+- **Templates**:
+  - Use `yaml` or `templateYaml` field name when extracting YAML from response data
+  - Send raw YAML content directly in request body (not wrapped in JSON) for create API
+  - Use `Content-Type: application/yaml` header for create API (similar to connectors)
+  - Extract `tags` from parsed YAML document (from `template.tags` or root `tags` field) - tags are included in YAML content itself
+  - Extract `description` or `templateDescription` from template data for GitX imports
+  - **Versioning**: Templates are versioned. Use `list-metadata` endpoint with `templateIdentifiers` filter to get all versions. Each version has a `versionLabel` field. Migrate all versions of each template.
+  - **Get Template Data**: Requires `versionLabel` query parameter (not `version`)
+  - **Import Endpoint**: Template identifier is in URL path: `/template/api/templates/import/{identifier}`
+  - **Import Query Parameters**: Includes `isHarnessCodeRepo` (defaults to `false` if not present)
 - **General Pattern**: Most inline resources require `identifier` and `name` fields extracted from source resource data
 
 ### Important Implementation Details for Import Methods (GitX)
@@ -548,6 +578,10 @@ for item in list_response:
   - `connectorRef`: Connector reference (for environments and pipelines, if present in source)
 - **Pipelines JSON body**:
   - `pipelineDescription`: Pipeline description (always included, even if empty string)
+- **Templates JSON body**:
+  - `templateDescription`: Template description (always included, may be empty string)
+  - `templateVersion`: Template version label (required)
+  - `templateName`: Template name (required)
 
 ### Extracting Nested Data from Get Responses
 
@@ -571,6 +605,7 @@ Common nested keys:
 - Organizations: `data.organization`
 - Connectors: `data.connector` (or directly in `data`)
 - Pipelines: `data.pipeline`
+- Templates: `data.template`
 
 #### Pattern for Extracting Nested Data from List Responses:
 
@@ -602,15 +637,24 @@ for item in list_response:
   - **Infrastructures**: Extract from `infrastructure` key: `infra.get('infrastructure', infra)`
   - **Services**: Extract from `service` key: `service.get('service', service)`
   - **Pipelines**: Extract from `pipeline` key: `pipeline.get('pipeline', pipeline)`
+  - **Templates**: Template list responses may return flat objects (not nested). Check response structure and extract accordingly.
   - **Always use fallback pattern**: `item.get('resourceName', item)` to handle cases where the key might not exist
-  - **Never access fields directly** from the list item - always extract from the nested key first
+  - **Never access fields directly** from the list item - always extract from the nested key first (except for templates which may be flat)
 - **Nested Data Extraction in Get Responses**: When getting individual resource data, extract from nested structure:
   - Use pattern: `data.get('data', {}).get('resourceName', data.get('data', {}))`
   - Example: `data.get('data', {}).get('environment', data.get('data', {}))`
 - **Infrastructures**: Require `environmentIdentifier` parameter when getting individual infrastructure data
 - **Pipelines**: YAML field is named `yamlPipeline` instead of `yaml` in the response
+- **Templates**: 
+  - YAML field may be `yaml` or `templateYaml` in the response
+  - Version information is in `versionLabel` field (not `version`)
+  - Use `list-metadata` endpoint with `templateIdentifiers` filter to get all versions (not a separate versions endpoint)
+  - Template identifier is included in import URL path: `/template/api/templates/import/{identifier}`
+  - Create API uses raw YAML with `Content-Type: application/yaml` (like connectors)
+  - Query parameter `isNewTemplate` should be `false` for updating existing templates
 - **Git Details Field Names**: 
   - Environments and Services use `entityGitDetails` field
+  - Templates may use `gitDetails` or `entityGitDetails` field
   - Other resources may use `gitDetails` field
   - Check both when extracting: `resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})`
 
@@ -664,6 +708,30 @@ def is_gitx_resource(self, resource_data: Dict) -> bool:
 - **API Endpoint**: `POST /ng/api/connectors` with YAML content as request body
 - **Content-Type**: `text/yaml` (not `application/json`)
 - **Note**: Connectors do NOT use the import API, they use the create API with YAML content
+
+### Templates (Special Case - Versioned Resources)
+
+- **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
+- **Versioning**: Templates are versioned resources. Each template can have multiple versions (identified by `versionLabel`), and all versions must be migrated.
+- **List Templates**: Uses `POST /template/api/templates/list-metadata` with `templateListType=LastUpdated` to get all templates
+- **Get Versions**: Uses same `list-metadata` endpoint with `templateListType=All` and `templateIdentifiers` filter in JSON body to get all versions of a specific template
+- **Version Extraction**: Extract `versionLabel` field from each entry in the list response (not a separate versions endpoint)
+- **Get Template Data**: Requires `versionLabel` query parameter (not `version`) to get data for a specific version
+- **Create Template**: 
+  - Uses `POST /template/api/templates` with raw YAML content (not JSON-wrapped)
+  - Content-Type: `application/yaml` (similar to connectors)
+  - Query parameters: `isNewTemplate=false` (for updating existing templates), `storeType=INLINE`, `comments=`
+  - YAML content must include `identifier`, `name`, `versionLabel` in the YAML structure itself
+- **Import Template**:
+  - Endpoint: `POST /template/api/templates/import/{identifier}` (template identifier in URL path)
+  - Query parameters: `connectorRef`, `isHarnessCodeRepo` (defaults to `false`), `repoName`, `branch`, `filePath`
+  - JSON body: `templateDescription`, `templateVersion` (version label), `templateName`
+- **Migration Pattern**: 
+  1. List all templates
+  2. For each template, get all versions using `get_template_versions()`
+  3. For each version, get template data and detect storage type
+  4. Migrate each version separately (inline or GitX based on storage type)
+  5. Export files include version in filename: `template_{identifier}_v{version}_...`
 
 ## Testing and Validation
 

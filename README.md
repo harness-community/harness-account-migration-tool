@@ -12,6 +12,7 @@ This Python script migrates resources from one Harness account to another using 
   - Infrastructures
   - Services
   - Pipelines
+  - Templates (with version support - migrates all versions)
 - **Automatic Storage Detection**: Detects whether resources are stored inline or in GitX (Git Experience)
 - **Dual Migration Support**: 
   - Inline resources: Migrated using YAML content via import APIs
@@ -110,6 +111,7 @@ python harness_migration.py \
 - `infrastructures` - Infrastructure definitions (supports both inline and GitX storage)
 - `services` - Services (supports both inline and GitX storage)
 - `pipelines` - Pipelines (supports both inline and GitX storage)
+- `templates` - Templates (supports both inline and GitX storage, migrates all versions of each template)
 
 ## Output
 
@@ -136,7 +138,8 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (organizations → projects → connectors → environments → infrastructures → services → pipelines)
+- Resources are migrated in dependency order (organizations → projects → connectors → environments → infrastructures → services → templates → pipelines)
+- **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
 - **Storage Type Detection**: The script automatically detects whether resources are stored inline or in GitX and uses the appropriate migration method
 - **Inline Resources**: Resources stored inline are migrated by copying their YAML content and importing it
 - **GitX Resources**: Resources stored in GitX are migrated by using their git location details to import from the git repository
