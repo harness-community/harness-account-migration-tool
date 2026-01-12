@@ -831,27 +831,34 @@ class HarnessAPIClient:
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
                               project_identifier: Optional[str] = None) -> List[str]:
         """Get all versions of a template"""
-        endpoint = f"/ng/api/templates/{template_identifier}/versions"
+        endpoint = "/template/api/templates/list-metadata"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        params['templateListType'] = 'All'
+        params['size'] = 100
+        params['module'] = 'cd'
+        params['routingId'] = self.account_id
         
-        response = self._make_request('GET', endpoint, params=params)
+        # Request body with template identifier filter
+        request_body = {
+            'filterType': 'Template',
+            'templateIdentifiers': [template_identifier]
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
         
         if response.status_code == 200:
             data = response.json()
-            versions = data.get('data', {}).get('versions', [])
-            # Extract version strings from the list
+            content = data.get('data', {}).get('content', [])
+            # Extract versionLabel from each template entry
             version_list = []
-            for version in versions:
-                if isinstance(version, dict):
-                    version_str = version.get('version', version.get('versionLabel', ''))
-                else:
-                    version_str = str(version)
-                if version_str:
-                    version_list.append(version_str)
+            for template_entry in content:
+                version_label = template_entry.get('versionLabel', '')
+                if version_label:
+                    version_list.append(version_label)
             return version_list
         else:
             print(f"Failed to get template versions: {response.status_code} - {response.text}")
