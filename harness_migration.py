@@ -869,7 +869,7 @@ class HarnessAPIClient:
         """Get template data for a specific version (for both GitX and Inline detection)"""
         endpoint = f"/template/api/templates/{template_identifier}"
         params = {
-            'version': version
+            'versionLabel': version
         }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
