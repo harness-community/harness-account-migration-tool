@@ -482,12 +482,7 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        # Build JSON payload with input set data
-        data = {
-            'inputSet': input_set_data
-        }
-        
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        response = self._make_request('POST', endpoint, params=params, data=input_set_data)
         
         if response.status_code in [200, 201]:
             print(f"Successfully created input set")
