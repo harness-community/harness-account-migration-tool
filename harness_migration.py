@@ -1372,6 +1372,28 @@ class HarnessMigrator:
         self.export_dir = Path("harness_exports")
         self.export_dir.mkdir(exist_ok=True)
     
+    def _get_project_scopes(self) -> List[tuple]:
+        """Get only project-level scopes (org_id, project_id) where both are not None"""
+        scopes = []
+        
+        # Get all organizations
+        orgs = self.source_client.list_organizations()
+        for org in orgs:
+            org_item = org.get('organization', org)
+            org_id = org_item.get('identifier', '')
+            if not org_id:
+                continue
+            
+            # Get all projects for this organization
+            projects = self.source_client.list_projects(org_id)
+            for project in projects:
+                project_item = project.get('project', project)
+                project_id = project_item.get('identifier', '')
+                if project_id:
+                    scopes.append((org_id, project_id))
+        
+        return scopes
+    
     def _get_all_scopes(self) -> List[tuple]:
         """Get all scopes (account, orgs, projects) as (org_identifier, project_identifier) tuples"""
         scopes = []
@@ -1940,14 +1962,14 @@ class HarnessMigrator:
         return results
     
     def migrate_pipelines(self) -> Dict[str, Any]:
-        """Migrate pipelines at all scopes (account, org, project)"""
+        """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Pipelines ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        scopes = self._get_all_scopes()
+        scopes = self._get_project_scopes()
         for org_id, project_id in scopes:
-            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            scope_label = f"project {project_id} (org {org_id})"
             print(f"\n--- Processing pipelines at {scope_label} ---")
             
             pipelines = self.source_client.list_pipelines(org_id, project_id)
@@ -1974,8 +1996,8 @@ class HarnessMigrator:
                 storage_type = "GitX" if is_gitx else "Inline"
                 print(f"  Pipeline storage type: {storage_type}")
                 
-                # Save exported data
-                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                # Save exported data (pipelines are always at project level)
+                scope_suffix = f"_org_{org_id}_project_{project_id}"
                 
                 yaml_content = None
                 git_details = None
@@ -2053,14 +2075,14 @@ class HarnessMigrator:
         return results
     
     def migrate_input_sets(self) -> Dict[str, Any]:
-        """Migrate input sets for all pipelines at all scopes"""
+        """Migrate input sets for all pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Input Sets ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        scopes = self._get_all_scopes()
+        scopes = self._get_project_scopes()
         for org_id, project_id in scopes:
-            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            scope_label = f"project {project_id} (org {org_id})"
             print(f"\n--- Processing input sets at {scope_label} ---")
             
             # Get all pipelines for this scope
@@ -2109,8 +2131,8 @@ class HarnessMigrator:
                         results['failed'] += 1
                         continue
                     
-                    # Export input set YAML to file for backup
-                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    # Export input set YAML to file for backup (input sets are always at project level)
+                    scope_suffix = f"_org_{org_id}_project_{project_id}"
                     export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.yaml"
                     export_file.write_text(input_set_yaml)
                     print(f"    Exported to {export_file}")
@@ -2136,14 +2158,14 @@ class HarnessMigrator:
         return results
     
     def migrate_triggers(self) -> Dict[str, Any]:
-        """Migrate triggers for all pipelines at all scopes"""
+        """Migrate triggers for all pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Triggers ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        scopes = self._get_all_scopes()
+        scopes = self._get_project_scopes()
         for org_id, project_id in scopes:
-            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            scope_label = f"project {project_id} (org {org_id})"
             print(f"\n--- Processing triggers at {scope_label} ---")
             
             # Get all pipelines for this scope
@@ -2180,8 +2202,8 @@ class HarnessMigrator:
                         results['failed'] += 1
                         continue
                     
-                    # Export trigger data to file for backup
-                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    # Export trigger data to file for backup (triggers are always at project level)
+                    scope_suffix = f"_org_{org_id}_project_{project_id}"
                     export_file = self.export_dir / f"trigger_{pipeline_identifier}_{identifier}{scope_suffix}.json"
                     
                     # Create a safe copy for export (remove read-only fields)
