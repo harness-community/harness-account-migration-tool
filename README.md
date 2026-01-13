@@ -138,8 +138,14 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (organizations → projects → connectors → environments → infrastructures → services → templates → pipelines)
+- Resources are migrated in dependency order (organizations → projects → secret manager templates → connectors → environments → infrastructures → services → other templates → pipelines)
 - **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
+- **Template Dependency Order**: Templates are migrated in a specific order based on dependencies (referenced templates must be migrated first):
+  - **SecretManager templates** are migrated first (right after projects/orgs, before Pipeline templates)
+  - **Step templates** and **MonitoredService templates** are migrated next (no dependencies)
+  - **Stage templates** are migrated after Step/MonitoredService templates (can reference Step and MonitoredService)
+  - **Pipeline templates** are migrated after Stage templates (can reference Stage and SecretManager templates)
+  - **Other template types** are migrated last (in any order)
 - **Dependency Order**: Templates must be migrated before pipelines, as pipelines can reference templates
 - **Storage Type Detection**: The script automatically detects whether resources are stored inline or in GitX and uses the appropriate migration method
 - **Inline Resources**: Resources stored inline are migrated by copying their YAML content and importing it

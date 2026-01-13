@@ -1596,11 +1596,110 @@ class HarnessMigrator:
         
         return results
     
-    def migrate_templates(self) -> Dict[str, Any]:
-        """Migrate templates at all scopes (account, org, project) - migrates all versions of each template"""
+    def _migrate_template_version(self, template_identifier: str, template_name: str, version: str,
+                                 template_data: Dict, org_id: Optional[str], project_id: Optional[str],
+                                 scope_suffix: str) -> Dict[str, int]:
+        """Migrate a single template version - returns success/failed counts"""
+        version_results = {'success': 0, 'failed': 0}
+        
+        # Detect if template is GitX or Inline
+        is_gitx = self.source_client.is_gitx_resource(template_data)
+        storage_type = "GitX" if is_gitx else "Inline"
+        print(f"    Template storage type: {storage_type}")
+        
+        yaml_content = None
+        git_details = None
+        
+        if is_gitx:
+            # GitX: Get git details for import
+            git_details = template_data.get('gitDetails', {}) or template_data.get('entityGitDetails', {})
+            if not git_details:
+                print(f"    Failed to get git details for GitX template {template_name} version {version}")
+                version_results['failed'] += 1
+                return version_results
+            # Extract connector reference from template data if present
+            connector_ref = template_data.get('connectorRef')
+            if connector_ref:
+                git_details['connectorRef'] = connector_ref
+            # Also get YAML for export
+            yaml_content = template_data.get('yaml', '') or template_data.get('templateYaml', '')
+            export_file = self.export_dir / f"template_{template_identifier}_v{version}{scope_suffix}.yaml"
+            if yaml_content:
+                export_file.write_text(yaml_content)
+                print(f"    Exported YAML to {export_file}")
+        else:
+            # Inline: Get YAML content for import
+            yaml_content = template_data.get('yaml', '') or template_data.get('templateYaml', '')
+            if not yaml_content:
+                print(f"    Failed to get YAML for inline template {template_name} version {version}")
+                version_results['failed'] += 1
+                return version_results
+            export_file = self.export_dir / f"template_{template_identifier}_v{version}{scope_suffix}.yaml"
+            export_file.write_text(yaml_content)
+            print(f"    Exported YAML to {export_file}")
+        
+        # Import to destination (skip in dry-run mode)
+        if self.dry_run:
+            if is_gitx:
+                print(f"    [DRY RUN] Would import template version {version} (GitX) from git location")
+            else:
+                print(f"    [DRY RUN] Would create template version {version} (Inline) with YAML content")
+            version_results['success'] += 1
+        else:
+            if is_gitx:
+                # GitX: Use import endpoint with git details
+                # Extract template description from template data
+                template_description = template_data.get('description') or template_data.get('templateDescription')
+                if self.dest_client.import_template_yaml(
+                    git_details=git_details, template_identifier=template_identifier, version=version,
+                    template_name=template_name, template_description=template_description,
+                    org_identifier=org_id, project_identifier=project_id
+                ):
+                    version_results['success'] += 1
+                else:
+                    version_results['failed'] += 1
+            else:
+                # Inline: Use create endpoint with YAML content
+                # Extract tags from YAML document
+                tags = None
+                if yaml_content:
+                    try:
+                        parsed_yaml = yaml.safe_load(yaml_content)
+                        if parsed_yaml and isinstance(parsed_yaml, dict):
+                            # Tags are typically at template.tags or directly at tags
+                            tags = parsed_yaml.get('template', {}).get('tags') or parsed_yaml.get('tags')
+                    except Exception as e:
+                        print(f"    Warning: Failed to parse YAML for tags: {e}")
+                
+                if self.dest_client.create_template(
+                    yaml_content=yaml_content, identifier=template_identifier, name=template_name, version=version,
+                    org_identifier=org_id, project_identifier=project_id, tags=tags
+                ):
+                    version_results['success'] += 1
+                else:
+                    version_results['failed'] += 1
+        
+        time.sleep(0.5)  # Rate limiting
+        return version_results
+    
+    def migrate_templates(self, template_types: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Migrate templates at all scopes (account, org, project) - migrates all versions of each template
+        
+        Args:
+            template_types: List of template types to migrate. If None, migrates all types in dependency order.
+                            Order: SecretManager, Step/MonitoredService, Stage, Pipeline, then others.
+                            Referenced templates must be migrated first.
+        """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Templates ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # Template type migration order based on dependencies
+        # SecretManager templates are handled separately (migrated early)
+        # Dependencies: Pipeline references Stage, Stage references Step/MonitoredService
+        # So we must migrate in reverse dependency order: Step/MonitoredService -> Stage -> Pipeline
+        # This method handles: Step/MonitoredService -> Stage -> Pipeline -> Others
+        template_type_order = ['Step', 'MonitoredService', 'Stage', 'Pipeline']
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -1609,120 +1708,110 @@ class HarnessMigrator:
             
             templates = self.source_client.list_templates(org_id, project_id)
             
+            # Group templates by type
+            templates_by_type = {}
             for template in templates:
                 # Extract template data from nested structure if present
                 template_item = template.get('template', template)
-                identifier = template_item.get('identifier', '')
-                name = template_item.get('name', identifier)
-                print(f"\nProcessing template: {name} ({identifier}) at {scope_label}")
+                template_type = template_item.get('templateEntityType', 'Unknown')
                 
-                # Get all versions for this template
-                versions = self.source_client.get_template_versions(identifier, org_id, project_id)
-                
-                if not versions:
-                    print(f"  No versions found for template {name}")
-                    results['skipped'] += 1
+                # Filter by requested types if specified
+                if template_types and template_type not in template_types:
                     continue
                 
-                print(f"  Found {len(versions)} version(s): {', '.join(versions)}")
-                
-                # Migrate each version
-                for version in versions:
-                    print(f"\n  Processing version: {version}")
-                    
-                    # Get template data for this version to detect storage type
-                    template_data = self.source_client.get_template_data(
-                        identifier, version, org_id, project_id
-                    )
-                    
-                    if not template_data:
-                        print(f"    Failed to get data for template {name} version {version}")
-                        results['failed'] += 1
-                        continue
-                    
-                    # Detect if template is GitX or Inline
-                    is_gitx = self.source_client.is_gitx_resource(template_data)
-                    storage_type = "GitX" if is_gitx else "Inline"
-                    print(f"    Template storage type: {storage_type}")
-                    
-                    # Save exported data
-                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
-                    
-                    yaml_content = None
-                    git_details = None
-                    
-                    if is_gitx:
-                        # GitX: Get git details for import
-                        git_details = template_data.get('gitDetails', {}) or template_data.get('entityGitDetails', {})
-                        if not git_details:
-                            print(f"    Failed to get git details for GitX template {name} version {version}")
-                            results['failed'] += 1
+                if template_type not in templates_by_type:
+                    templates_by_type[template_type] = []
+                templates_by_type[template_type].append(template_item)
+            
+            # Migrate templates in dependency order
+            # First, migrate types in the defined order
+            for template_type in template_type_order:
+                if template_type in templates_by_type:
+                    print(f"\n--- Migrating {template_type} templates ---")
+                    for template_item in templates_by_type[template_type]:
+                        identifier = template_item.get('identifier', '')
+                        name = template_item.get('name', identifier)
+                        print(f"\nProcessing {template_type} template: {name} ({identifier}) at {scope_label}")
+                        
+                        # Get all versions for this template
+                        versions = self.source_client.get_template_versions(identifier, org_id, project_id)
+                        
+                        if not versions:
+                            print(f"  No versions found for template {name}")
+                            results['skipped'] += 1
                             continue
-                        # Extract connector reference from template data if present
-                        connector_ref = template_data.get('connectorRef')
-                        if connector_ref:
-                            git_details['connectorRef'] = connector_ref
-                        # Also get YAML for export
-                        yaml_content = template_data.get('yaml', '') or template_data.get('templateYaml', '')
-                        export_file = self.export_dir / f"template_{identifier}_v{version}{scope_suffix}.yaml"
-                        if yaml_content:
-                            export_file.write_text(yaml_content)
-                            print(f"    Exported YAML to {export_file}")
-                    else:
-                        # Inline: Get YAML content for import
-                        yaml_content = template_data.get('yaml', '') or template_data.get('templateYaml', '')
-                        if not yaml_content:
-                            print(f"    Failed to get YAML for inline template {name} version {version}")
-                            results['failed'] += 1
-                            continue
-                        export_file = self.export_dir / f"template_{identifier}_v{version}{scope_suffix}.yaml"
-                        export_file.write_text(yaml_content)
-                        print(f"    Exported YAML to {export_file}")
-                    
-                    # Import to destination (skip in dry-run mode)
-                    if self.dry_run:
-                        if is_gitx:
-                            print(f"    [DRY RUN] Would import template version {version} (GitX) from git location")
-                        else:
-                            print(f"    [DRY RUN] Would create template version {version} (Inline) with YAML content")
-                        results['success'] += 1
-                    else:
-                        if is_gitx:
-                            # GitX: Use import endpoint with git details
-                            # Extract template description from template data
-                            template_description = template_data.get('description') or template_data.get('templateDescription')
-                            if self.dest_client.import_template_yaml(
-                                git_details=git_details, template_identifier=identifier, version=version,
-                                template_name=name, template_description=template_description,
-                                org_identifier=org_id, project_identifier=project_id
-                            ):
-                                results['success'] += 1
-                            else:
-                                results['failed'] += 1
-                        else:
-                            # Inline: Use create endpoint with YAML content
-                            # Extract tags from YAML document
-                            tags = None
-                            if yaml_content:
-                                try:
-                                    parsed_yaml = yaml.safe_load(yaml_content)
-                                    if parsed_yaml and isinstance(parsed_yaml, dict):
-                                        # Tags are typically at template.tags or directly at tags
-                                        tags = parsed_yaml.get('template', {}).get('tags') or parsed_yaml.get('tags')
-                                except Exception as e:
-                                    print(f"    Warning: Failed to parse YAML for tags: {e}")
+                        
+                        print(f"  Found {len(versions)} version(s): {', '.join(versions)}")
+                        
+                        # Migrate each version
+                        for version in versions:
+                            print(f"\n  Processing version: {version}")
                             
-                            if self.dest_client.create_template(
-                                yaml_content=yaml_content, identifier=identifier, name=name, version=version,
-                                org_identifier=org_id, project_identifier=project_id, tags=tags
-                            ):
-                                results['success'] += 1
-                            else:
+                            # Get template data for this version to detect storage type
+                            template_data = self.source_client.get_template_data(
+                                identifier, version, org_id, project_id
+                            )
+                            
+                            if not template_data:
+                                print(f"    Failed to get data for template {name} version {version}")
                                 results['failed'] += 1
-                    
-                    time.sleep(0.5)  # Rate limiting
+                                continue
+                            
+                            scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                            version_results = self._migrate_template_version(
+                                identifier, name, version, template_data, org_id, project_id, scope_suffix
+                            )
+                            results['success'] += version_results['success']
+                            results['failed'] += version_results['failed']
+            
+            # Then migrate other template types (not in the ordered list)
+            other_types = [t for t in templates_by_type.keys() if t not in template_type_order]
+            if other_types:
+                print(f"\n--- Migrating other template types: {', '.join(other_types)} ---")
+                for template_type in other_types:
+                    for template_item in templates_by_type[template_type]:
+                        identifier = template_item.get('identifier', '')
+                        name = template_item.get('name', identifier)
+                        print(f"\nProcessing {template_type} template: {name} ({identifier}) at {scope_label}")
+                        
+                        # Get all versions for this template
+                        versions = self.source_client.get_template_versions(identifier, org_id, project_id)
+                        
+                        if not versions:
+                            print(f"  No versions found for template {name}")
+                            results['skipped'] += 1
+                            continue
+                        
+                        print(f"  Found {len(versions)} version(s): {', '.join(versions)}")
+                        
+                        # Migrate each version
+                        for version in versions:
+                            print(f"\n  Processing version: {version}")
+                            
+                            # Get template data for this version to detect storage type
+                            template_data = self.source_client.get_template_data(
+                                identifier, version, org_id, project_id
+                            )
+                            
+                            if not template_data:
+                                print(f"    Failed to get data for template {name} version {version}")
+                                results['failed'] += 1
+                                continue
+                            
+                            scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                            version_results = self._migrate_template_version(
+                                identifier, name, version, template_data, org_id, project_id, scope_suffix
+                            )
+                            results['success'] += version_results['success']
+                            results['failed'] += version_results['failed']
         
         return results
+    
+    def migrate_secret_manager_templates(self) -> Dict[str, Any]:
+        """Migrate SecretManager templates - must be migrated early (right after projects/orgs)"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} SecretManager Templates ===")
+        return self.migrate_templates(template_types=['SecretManager'])
     
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
@@ -1738,6 +1827,10 @@ class HarnessMigrator:
         if 'projects' in resource_types:
             all_results['projects'] = self.migrate_projects()
         
+        # SecretManager templates must be migrated early (right after projects/orgs)
+        if 'templates' in resource_types:
+            all_results['secret_manager_templates'] = self.migrate_secret_manager_templates()
+        
         # Then migrate other resources
         if 'connectors' in resource_types:
             all_results['connectors'] = self.migrate_connectors()
@@ -1751,6 +1844,7 @@ class HarnessMigrator:
         if 'services' in resource_types:
             all_results['services'] = self.migrate_services()
         
+        # Other templates (Pipeline, Stage, Step, MonitoredService, and others) - migrated before pipelines
         if 'templates' in resource_types:
             all_results['templates'] = self.migrate_templates()
         
