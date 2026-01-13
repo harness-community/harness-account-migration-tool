@@ -128,6 +128,8 @@ The `_get_all_scopes()` method automatically discovers all scopes:
 
 Each migration method iterates through all scopes to ensure complete migration.
 
+**Important Exception**: Pipelines, input sets, and triggers only exist at the project level in Harness. These resources use `_get_project_scopes()` instead of `_get_all_scopes()` to only process project-level scopes (where both `orgIdentifier` and `projectIdentifier` are specified).
+
 ## API Key Format
 
 Harness API keys contain the account ID in the format:
@@ -324,28 +326,32 @@ Exported files include scope information:
 - `POST /ng/api/servicesV2/import` - Import service from GitX (query parameters only: accountIdentifier, serviceIdentifier, connectorRef, repoName, branch, filePath)
 
 ### Pipelines
+- **Scope**: Project-level only (pipelines only exist at the project level)
 - `POST /pipeline/api/pipelines/list` - List pipelines
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
 - `POST /v1/orgs/{org}/projects/{project}/pipelines` - Create pipeline (for inline resources, JSON body with pipeline_yaml, identifier, name, accountId, orgIdentifier, projectIdentifier, tags)
 - `POST /pipeline/api/pipelines/import` - Import pipeline from GitX (query parameters: orgIdentifier, projectIdentifier, repoName, branch, filePath, connectorRef; JSON body: pipelineDescription)
+- **Migration Pattern**: Uses `_get_project_scopes()` to only iterate through project-level scopes
 
 ### Input Sets
 - **Storage Method**: Always Inline (not tracked via GitX)
+- **Scope**: Project-level only (child entities of pipelines, which only exist at project level)
 - **Child Entity**: Input sets are child entities of pipelines and must be migrated after their parent pipeline
 - `GET /pipeline/api/inputSets` - List input sets for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
 - `GET /pipeline/api/inputSets/{identifier}` - Get input set data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
 - `POST /pipeline/api/inputSets` - Create input set (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"inputSet": {...}}`)
-- **Data Extraction**: Extract from `inputSet` key in list response
-- **Migration Pattern**: Iterate through all pipelines, then list and migrate input sets for each pipeline
+- **Data Extraction**: Extract YAML string from `data.inputSetYaml` field (not from nested `inputSet` key)
+- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates input sets for each pipeline
 
 ### Triggers
 - **Storage Method**: Always Inline (not tracked via GitX)
+- **Scope**: Project-level only (child entities of pipelines, which only exist at project level)
 - **Child Entity**: Triggers are child entities of pipelines and must be migrated after their parent pipeline and input sets (triggers may reference input sets)
 - `GET /pipeline/api/triggers` - List triggers for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
 - `GET /pipeline/api/triggers/{identifier}` - Get trigger data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
 - `POST /pipeline/api/triggers` - Create trigger (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"trigger": {...}}`)
 - **Data Extraction**: Extract from `trigger` key in list response
-- **Migration Pattern**: Iterate through all pipelines, then list and migrate triggers for each pipeline
+- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates triggers for each pipeline
 
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
