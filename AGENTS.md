@@ -236,6 +236,7 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
 - **Exceptions**: 
   - Connector creation uses `Content-Type: text/yaml` with YAML content in request body
   - Template creation uses `Content-Type: application/yaml` with raw YAML content in request body
+  - Trigger creation uses `Content-Type: application/yaml` with raw YAML content in request body
 
 ### Pagination Support
 - **All list methods support pagination**: The script automatically fetches all pages of results
@@ -334,24 +335,33 @@ Exported files include scope information:
 - **Migration Pattern**: Uses `_get_project_scopes()` to only iterate through project-level scopes
 
 ### Input Sets
-- **Storage Method**: Always Inline (not tracked via GitX)
+- **Storage Method**: Can be GitX or Inline (inherits from parent pipeline - if pipeline is GitX, input set is also GitX)
 - **Scope**: Project-level only (child entities of pipelines, which only exist at project level)
 - **Child Entity**: Input sets are child entities of pipelines and must be migrated after their parent pipeline
 - `GET /pipeline/api/inputSets` - List input sets for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
 - `GET /pipeline/api/inputSets/{identifier}` - Get input set data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
 - `POST /pipeline/api/inputSets` - Create input set (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"inputSet": {...}}`)
-- **Data Extraction**: Extract YAML string from `data.inputSetYaml` field (not from nested `inputSet` key)
-- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates input sets for each pipeline
+- `POST /pipeline/api/inputSets/import/{identifier}` - Import input set from GitX (query parameters: accountIdentifier, pipelineIdentifier, orgIdentifier, projectIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath; JSON body: `{"inputSetName": "...", "inputSetDescription": "..."}`)
+- **Data Extraction**: 
+  - Get response: Extract full data dict from `data` key (not nested under `inputSet` key)
+  - YAML content: Extract YAML string from `data.inputSetYaml` field
+  - List response: Extract from `inputSet` key in list response
+- **GitX Detection**: Input sets inherit GitX storage from their parent pipeline - if pipeline is GitX, input set is also GitX
+- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates input sets for each pipeline. For GitX input sets, uses import endpoint with git details. For inline input sets, parses YAML and uses create endpoint.
 
 ### Triggers
-- **Storage Method**: Always Inline (not tracked via GitX)
+- **Storage Method**: Always Inline (NOT stored in GitX, even when parent pipeline is stored in GitX)
 - **Scope**: Project-level only (child entities of pipelines, which only exist at project level)
 - **Child Entity**: Triggers are child entities of pipelines and must be migrated after their parent pipeline and input sets (triggers may reference input sets)
-- `GET /pipeline/api/triggers` - List triggers for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
-- `GET /pipeline/api/triggers/{identifier}` - Get trigger data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
-- `POST /pipeline/api/triggers` - Create trigger (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"trigger": {...}}`)
-- **Data Extraction**: Extract from `trigger` key in list response
-- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates triggers for each pipeline
+- `GET /pipeline/api/triggers` - List triggers for a pipeline (query parameters: `routingId`, `accountIdentifier`, `orgIdentifier`, `projectIdentifier`, `targetIdentifier` (pipeline identifier), `size`, `page`, `sort`)
+- `GET /pipeline/api/triggers/{identifier}/details` - Get trigger data (query parameters: `routingId`, `accountIdentifier`, `orgIdentifier`, `projectIdentifier`, `targetIdentifier` (pipeline identifier))
+- `POST /pipeline/api/triggers` - Create trigger (query parameters: `routingId`, `accountIdentifier`, `targetIdentifier` (pipeline identifier), `orgIdentifier`, `projectIdentifier`, `ignoreError`, `storeType`; Content-Type: `application/yaml`; body: raw YAML content)
+- **Data Extraction**: 
+  - List response: Triggers are **NOT nested** under a `trigger` key - data is directly in the list items (unlike most other resources)
+  - Get response: Trigger data is directly in `data` key (not nested under `trigger` key)
+  - YAML content: Extract YAML string from `yaml` field in trigger data
+- **Important**: Triggers use `targetIdentifier` (not `pipelineIdentifier`) in query parameters for all endpoints
+- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates triggers for each pipeline. Always uses inline creation (never GitX import).
 
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
@@ -438,6 +448,8 @@ for item in list_response:
 - **Projects**: `item.get('project', item)`
 - **Organizations**: `item.get('organization', item)`
 - **Secrets**: `item.get('secret', item)` (v2 API may return secrets in nested structure)
+- **Input Sets**: `item.get('inputSet', item)` (in list response)
+- **Triggers**: **Exception** - Triggers in list response are **NOT nested** - data is directly in the list item (no `trigger` key)
 
 **Important**: Always use the fallback pattern `item.get('resourceName', item)` to handle cases where the API might return the data directly (for backward compatibility or different API versions).
 
@@ -702,7 +714,7 @@ for item in list_response:
 
 ### Handling Special Cases
 
-- **Nested Data Extraction in List Responses**: **ALL** Harness list APIs return resources nested under a key matching the resource name. This is a universal pattern:
+- **Nested Data Extraction in List Responses**: **MOST** Harness list APIs return resources nested under a key matching the resource name. This is a common pattern:
   - **Connectors**: Extract from `connector` key: `connector.get('connector', connector)`
   - **Projects**: Extract from `project` key: `project.get('project', project)`
   - **Organizations**: Extract from `organization` key: `org.get('organization', org)`
@@ -710,14 +722,30 @@ for item in list_response:
   - **Infrastructures**: Extract from `infrastructure` key: `infra.get('infrastructure', infra)`
   - **Services**: Extract from `service` key: `service.get('service', service)`
   - **Pipelines**: Extract from `pipeline` key: `pipeline.get('pipeline', pipeline)`
+  - **Input Sets**: Extract from `inputSet` key: `input_set.get('inputSet', input_set)`
   - **Templates**: Template list responses may return flat objects (not nested). Check response structure and extract accordingly.
+  - **Triggers**: **Exception** - Triggers in list response are **NOT nested** - access fields directly from the list item (no `trigger` key)
   - **Always use fallback pattern**: `item.get('resourceName', item)` to handle cases where the key might not exist
-  - **Never access fields directly** from the list item - always extract from the nested key first (except for templates which may be flat)
+  - **Never access fields directly** from the list item - always extract from the nested key first (except for templates and triggers which may be flat)
 - **Nested Data Extraction in Get Responses**: When getting individual resource data, extract from nested structure:
   - Use pattern: `data.get('data', {}).get('resourceName', data.get('data', {}))`
   - Example: `data.get('data', {}).get('environment', data.get('data', {}))`
 - **Infrastructures**: Require `environmentIdentifier` parameter when getting individual infrastructure data
 - **Pipelines**: YAML field is named `yamlPipeline` instead of `yaml` in the response
+- **Input Sets**: 
+  - YAML field is named `inputSetYaml` in the get response (located in `data.inputSetYaml`)
+  - Can be stored in GitX (inherits from parent pipeline - if pipeline is GitX, input set is also GitX)
+  - For GitX input sets, use import endpoint with git details and JSON body containing `inputSetName` and `inputSetDescription`
+  - For inline input sets, parse YAML and use create endpoint with JSON body containing `{"inputSet": {...}}`
+  - Get response returns full data dict (not just YAML string) for GitX/Inline detection
+- **Triggers**: 
+  - YAML field is named `yaml` in the get response (located in `data.yaml`)
+  - Always inline (NOT stored in GitX, even when parent pipeline is stored in GitX)
+  - Use `targetIdentifier` (not `pipelineIdentifier`) in query parameters for all endpoints
+  - Get endpoint requires `/details` suffix: `/pipeline/api/triggers/{identifier}/details`
+  - List endpoint requires `routingId` and `accountIdentifier` query parameters (in addition to `targetIdentifier`)
+  - Create endpoint uses raw YAML with `Content-Type: application/yaml` and requires `storeType: INLINE`, `ignoreError`, `routingId`, `accountIdentifier`, `targetIdentifier`
+  - Triggers in list response are NOT nested under a `trigger` key (unlike most other resources) - access fields directly
 - **Templates**: 
   - YAML field may be `yaml` or `templateYaml` in the response
   - Version information is in `versionLabel` field (not `version`)
