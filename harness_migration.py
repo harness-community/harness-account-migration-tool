@@ -565,9 +565,11 @@ class HarnessAPIClient:
     def get_trigger_data(self, trigger_identifier: str, pipeline_identifier: str,
                         org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
         """Get trigger data"""
-        endpoint = f"/pipeline/api/triggers/{trigger_identifier}"
+        endpoint = f"/pipeline/api/triggers/{trigger_identifier}/details"
         params = {
-            'pipelineIdentifier': pipeline_identifier
+            'routingId': self.account_id,
+            'accountIdentifier': self.account_id,
+            'targetIdentifier': pipeline_identifier  # targetIdentifier is the pipeline identifier
         }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
@@ -578,8 +580,8 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            # Extract from nested 'trigger' key if present, fallback to 'data' itself
-            trigger_data = data.get('data', {}).get('trigger', data.get('data', {}))
+            # Trigger data is directly in 'data' key (not nested under 'trigger')
+            trigger_data = data.get('data', {})
             return trigger_data
         else:
             print(f"Failed to get trigger data: {response.status_code} - {response.text}")
@@ -2293,10 +2295,9 @@ class HarnessMigrator:
                 print(f"\nProcessing triggers for pipeline: {pipeline_name} ({pipeline_identifier})")
                 
                 for trigger in triggers:
-                    # Extract trigger data from nested structure if present
-                    trigger_item = trigger.get('trigger', trigger)
-                    identifier = trigger_item.get('identifier', '')
-                    name = trigger_item.get('name', identifier)
+                    # Trigger data is directly in the list response (not nested under 'trigger' key)
+                    identifier = trigger.get('identifier', '')
+                    name = trigger.get('name', identifier)
                     print(f"  Processing trigger: {name} ({identifier})")
                     
                     # Get full trigger data
