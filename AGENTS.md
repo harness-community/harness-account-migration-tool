@@ -35,11 +35,11 @@ This is a Python-based tool for migrating Harness account resources from one Har
    - `remove_none_values()`: Recursively removes null values from data structures
    - `clean_for_creation()`: Removes read-only fields before creating resources
 
-## Resource Types and Handling
+## Resource Storage Methods
 
-### Important: Not All Resources Use YAML Documents
+### Critical Understanding
 
-**Critical Understanding**: Not all resources in Harness use YAML documents to store their contents. The migration approach must match the resource's storage method:
+Not all resources in Harness use YAML documents to store their contents. The migration approach must match the resource's storage method:
 
 1. **GitX (Git Experience) Resources**: Stored in Git repositories
    - Use "Import from YAML" APIs
@@ -48,70 +48,28 @@ This is a Python-based tool for migrating Harness account resources from one Har
 
 2. **Inline Resources**: Stored directly in Harness database
    - Use Create API endpoints with data fields
-   - No YAML representation available
    - Migration: Get data → Clean → Create via Create API
 
 3. **Hybrid Resources**: Some resource types support both methods
    - Must detect storage method before migration
    - Use appropriate API based on storage method
 
-### Organizations and Projects
-- **Storage Method**: Always Inline (not YAML-based)
-- **Migration Approach**: Direct API calls with data fields
-- **API Endpoints**: 
-  - Organizations: `POST /ng/api/organizations` with `{ "organization": {...} }`
-  - Projects: `POST /ng/api/projects` with `{ "project": {...} }`
-- **Data Extraction**: Data is extracted directly from list responses
-- **Read-only Field Removal**: Automatically removes fields like `createdAt`, `lastModifiedAt`, etc.
+### Storage Method Detection
 
-### Connectors
-- **Storage Method**: Always Inline (not stored in GitX)
-- **Migration Approach**: Create API with YAML content directly in request body
-- **API Endpoint**: `POST /ng/api/connectors` with YAML content
-- **Content-Type**: `text/yaml` header
-- **Data Extraction**: Extract from `connector` key in list response
-- **Note**: Connectors use create API, not import API
+The `is_gitx_resource()` method automatically detects storage method by checking:
+1. `storeType` field (REMOTE = GitX, INLINE = Inline)
+2. Presence of `gitDetails` or `entityGitDetails` field
+3. Git-related fields (`repo`, `branch`)
+4. Defaults to Inline if no indicators found
 
-### Other Resources (Environments, Infrastructures, Services, Pipelines, Templates)
-- **Storage Method**: Can be GitX or Inline (varies by resource and account configuration)
-- **Automatic Detection**: The script detects storage method using `is_gitx_resource()` method
-- **Detection Logic**:
-  - Checks `storeType` field (REMOTE = GitX, INLINE = Inline)
-  - Checks for `gitDetails` or `entityGitDetails` field
-  - Checks for git-related fields (`repo`, `branch`)
-  - Defaults to Inline if no indicators found
-- **Export Format**: Resources are exported as YAML files (for both GitX and Inline)
-- **Migration Process for Inline Resources**: 
-  1. Get resource data from source account (using `get_*_data()` method)
-  2. Extract YAML content from resource data (from `yaml` field, or `yamlPipeline` for pipelines)
-  3. Extract additional metadata (identifier, type, name, etc.) from resource data
-  4. Export YAML to file for backup
-  5. Create in destination using **create API** (`POST /ng/api/{resource}` or resource-specific endpoint) with JSON body containing:
-     - `yaml`: The YAML content (or `pipeline_yaml` for pipelines)
-     - `accountId`: Account identifier
-     - `identifier`: Resource identifier (required for environments, services, and pipelines)
-     - `type`: Resource type (required for environments only)
-     - `name`: Resource name (required for environments, services, and pipelines)
-     - `orgIdentifier`: Organization identifier (always included, may be None)
-     - `projectIdentifier`: Project identifier (always included, may be None)
-     - Additional resource-specific fields (e.g., `environmentIdentifier` for infrastructures, `tags` for pipelines)
-- **Migration Process for GitX Resources**:
-  1. Get resource data from source account (using `get_*_data()` method)
-  2. Extract git details from `entityGitDetails` or `gitDetails` field
-  3. Extract additional metadata (identifier, connectorRef, etc.) from resource data
-  4. Export YAML to file for backup (if available)
-  5. Import to destination using **import API** (`POST /ng/api/{resource}/import` or resource-specific endpoint) with query parameters and optionally a JSON body:
-     - **Query parameters**:
-       - `accountIdentifier`: Account identifier (required for most resources)
-       - `{resource}Identifier`: Resource identifier (required for environments)
-       - `orgIdentifier`: Organization identifier (if applicable)
-       - `projectIdentifier`: Project identifier (if applicable)
-       - `connectorRef`: Connector reference (for environments and pipelines, if present in source)
-       - `repoName`: Repository name (from git details)
-       - `branch`: Branch name (from git details)
-       - `filePath`: File path (from git details)
-     - **JSON body** (for pipelines only):
-       - `pipelineDescription`: Pipeline description (always included, may be empty string)
+### Resource-Specific Storage Methods
+
+- **Organizations and Projects**: Always Inline (not YAML-based)
+- **Connectors**: Always Inline (not stored in GitX)
+- **Secrets**: Always Inline (not tracked via GitX)
+- **Environments, Infrastructures, Services, Pipelines, Templates**: Can be GitX or Inline (varies by resource and account configuration)
+- **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
+- **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
 
 ## Scope Handling
 
@@ -128,7 +86,7 @@ The `_get_all_scopes()` method automatically discovers all scopes:
 
 Each migration method iterates through all scopes to ensure complete migration.
 
-**Important Exception**: Pipelines, input sets, and triggers only exist at the project level in Harness. These resources use `_get_project_scopes()` instead of `_get_all_scopes()` to only process project-level scopes (where both `orgIdentifier` and `projectIdentifier` are specified).
+**Important Exception**: Pipelines, input sets, and triggers only exist at the project level in Harness. These resources use `_get_project_scopes()` instead of `_get_all_scopes()` to only process project-level scopes.
 
 ## API Key Format
 
@@ -160,7 +118,7 @@ Resources are migrated in dependency order:
 12. **Input Sets** (twelfth - child entities of pipelines, must be migrated after pipelines)
 13. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
 
-**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. **Important**: Templates must be migrated before pipelines because pipelines can be built from templates and depend on them. Input sets and triggers are child entities of pipelines and are migrated after their parent pipelines, with input sets migrated before triggers since triggers may reference input sets.
+**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
 
 **Template Migration Order**: Templates are migrated in a specific dependency order (referenced templates must be migrated first):
 - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)
@@ -171,10 +129,122 @@ Resources are migrated in dependency order:
 - **Pipeline templates**: Migrated sixth (can reference Stage and SecretManager templates)
 - **Other template types**: Migrated last (in any order)
 
+## Migration Process
+
+### For Inline Resources
+1. Get resource data from source account (using `get_*_data()` method)
+2. Extract YAML content from resource data (from `yaml` field, or `yamlPipeline` for pipelines, `inputSetYaml` for input sets)
+3. Extract additional metadata (identifier, type, name, etc.) from resource data
+4. Export YAML to file for backup
+5. Create in destination using **create API** with JSON body containing YAML content and metadata
+
+### For GitX Resources
+1. Get resource data from source account (using `get_*_data()` method)
+2. Extract git details from `entityGitDetails` or `gitDetails` field
+3. Extract additional metadata (identifier, connectorRef, etc.) from resource data
+4. Export YAML to file for backup (if available)
+5. Import to destination using **import API** with query parameters (and optionally JSON body for some resources)
+
+## Common Patterns
+
+### Harness API List Response Pattern
+
+**Critical Pattern**: Most Harness API list endpoints return resources in a nested structure where each item in the list contains the resource data under a key matching the resource name.
+
+**List Response Format**:
+```json
+[
+  {
+    "resourceName": {
+      "identifier": "...",
+      "name": "...",
+      // ... other resource fields
+    }
+  },
+  // ... more resources
+]
+```
+
+**Required Pattern for All List Iterations**:
+When iterating through list responses, **always** extract the resource data from the nested key:
+
+```python
+for item in list_response:
+    # Extract from key matching resource name, fallback to item itself
+    resource_item = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'infrastructure'
+    identifier = resource_item.get('identifier', '')
+    name = resource_item.get('name', identifier)
+    # ... use resource_item for all data access
+```
+
+**Resources Using This Pattern**:
+- Connectors, Environments, Infrastructures, Services, Pipelines, Projects, Organizations, Secrets, Input Sets
+
+**Exceptions**:
+- **Templates**: Template list responses may return flat objects (not nested). Check response structure and extract accordingly.
+- **Triggers**: Triggers in list response are **NOT nested** - data is directly in the list item (no `trigger` key)
+
+**Important**: Always use the fallback pattern `item.get('resourceName', item)` to handle cases where the API might return the data directly (for backward compatibility or different API versions).
+
+### Extracting Nested Data from Get Responses
+
+When implementing `get_*_data()` methods, always check for nested keys in the response:
+
+```python
+def get_new_resource_data(self, identifier, org_id=None, project_id=None):
+    endpoint = f"/ng/api/new-resource/{identifier}"
+    response = self._make_request('GET', endpoint, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        # Extract from nested key if present, fallback to 'data' itself
+        resource_data = data.get('data', {}).get('newResource', data.get('data', {}))
+        return resource_data
+    return None
+```
+
+## Adding a New Resource Type
+
+**Important**: First determine if the resource uses GitX (YAML) or Inline (data fields) storage. Many resources support both, so you'll need to detect and handle both cases.
+
+### For Resources That Support Both GitX and Inline:
+
+1. **Add list method** to `HarnessAPIClient`:
+   - Use `_fetch_paginated()` helper for pagination support
+   - Extract from nested key in list response (see Common Patterns)
+
+2. **Add get data method** (for detection and data extraction):
+   - Returns full resource data dict
+   - Extract from nested key if present (see Common Patterns)
+
+3. **Add get YAML method** (wrapper around get_data):
+   - Extract YAML string from resource data (field name varies by resource)
+
+4. **Add create method** (for inline resources):
+   - Use `POST /ng/api/{resource}` endpoint (not the import endpoint)
+   - Send JSON body with YAML content and metadata
+   - Include `accountId`, `identifier`, `name`, `orgIdentifier`, `projectIdentifier`
+   - Add resource-specific fields as needed
+
+5. **Add import method** (for GitX resources):
+   - Use `POST /ng/api/{resource}/import` endpoint
+   - Send git details as query parameters (repoName, branch, filePath)
+   - Include `accountIdentifier`, `orgIdentifier`, `projectIdentifier` as query parameters
+   - Some resources require JSON body (see `api-notes.md` for details)
+
+6. **Add migration method** to `HarnessMigrator`:
+   - Use `_get_all_scopes()` or `_get_project_scopes()` as appropriate
+   - Extract from nested key in list response
+   - Detect storage type using `is_gitx_resource()`
+   - Export YAML for backup
+   - Call appropriate create or import method based on storage type
+
+7. **Add to `migrate_all()` and command-line choices**
+
+For detailed API endpoint information, see `api-notes.md`. For implementation-specific details and quirks, see `implementation-notes.md`.
+
 ## Dry-Run Mode
 
 Dry-run mode allows testing without making changes:
-
 - **No Destination Required**: Destination API key not needed
 - **Export Only**: Resources are listed and exported to YAML files
 - **No API Calls**: No create/import operations are performed
@@ -218,7 +288,9 @@ python harness_migration.py \
 harness_migration.py    # Main script
 requirements.txt        # Python dependencies
 README.md              # User documentation
-AGENTS.md              # This file (agent documentation)
+AGENTS.md              # This file (generic agent instructions)
+api-notes.md           # Detailed API endpoint information
+implementation-notes.md # Implementation-specific details and quirks
 harness_exports/       # Directory for exported YAML files (created at runtime)
 ```
 
@@ -230,29 +302,16 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
 ## Important Implementation Details
 
 ### API Request Pattern
-- All requests include `accountIdentifier` in query parameters
+- All requests include `accountIdentifier` in query parameters (or `routingId` for some endpoints)
 - Authentication via `x-api-key` header
 - Content-Type: `application/json` (most endpoints)
-- **Exceptions**: 
-  - Connector creation uses `Content-Type: text/yaml` with YAML content in request body
-  - Template creation uses `Content-Type: application/yaml` with raw YAML content in request body
-  - Trigger creation uses `Content-Type: application/yaml` with raw YAML content in request body
+- **Exceptions**: See `implementation-notes.md` for Content-Type exceptions
 
 ### Pagination Support
 - **All list methods support pagination**: The script automatically fetches all pages of results
 - **Pagination Helper**: Uses `_fetch_paginated()` method to handle paginated responses
-- **Pagination Parameters**: 
-  - Default page size: 100 items per page
-  - Most APIs use `page` and `size` parameters (configurable)
-  - Some APIs use `pageIndex` and `pageSize` parameters (e.g., secrets v2 API)
-  - Some APIs use pagination in query parameters (GET requests, most POST requests)
-  - Some APIs use pagination in request body (e.g., pipelines API)
-- **Response Structure**: 
-  - Content is typically at `data.content` in the response
-  - Pagination metadata at `data.totalPages`, `data.totalElements`, etc.
-  - Automatically detects when all pages have been fetched
+- **Pagination Parameters**: Vary by API (see `implementation-notes.md` for details)
 - **Safety Limits**: Maximum 10,000 pages to prevent infinite loops
-- **Custom Pagination**: Some APIs (like secrets v2) require custom pagination logic due to different parameter names (`pageIndex`/`pageSize` instead of `page`/`size`)
 
 ### Error Handling
 - API errors are caught and logged
@@ -275,586 +334,6 @@ Exported files include scope information:
 - Project level: `resource_identifier_org_ORG_ID_project_PROJECT_ID.yaml`
 - **Templates**: Include version in filename: `template_identifier_vVERSION_scope_suffix.yaml`
 
-## API Endpoints Used
-
-### Organizations
-- `GET /ng/api/organizations` - List organizations
-- `POST /ng/api/organizations` - Create organization
-
-### Projects
-- `GET /ng/api/projects` - List projects (all orgs when no org_identifier)
-- `POST /ng/api/projects` - Create project
-
-### Connectors
-- `GET /ng/api/connectors` - List connectors
-- `GET /ng/api/connectors/{identifier}` - Get connector
-- `POST /ng/api/connectors` - Create connector (with YAML content in body, `Content-Type: text/yaml`)
-
-### Secrets
-- **API Version**: Uses v2 API endpoints (https://apidocs.harness.io/secrets)
-- `POST /ng/api/v2/secrets/list/secrets` - List secrets (with filter criteria in request body, supports pagination with pageIndex/pageSize)
-- `GET /ng/api/v2/secrets/{identifier}` - Get secret by ID and scope
-- `POST /ng/api/v2/secrets` - Create secret at given scope (with secret data in JSON body)
-- **Pagination**: Uses `pageIndex` and `pageSize` parameters (not `page` and `size`)
-- **Query Parameters**: Requires `routingId` (account identifier) and `sortOrders` for listing
-- **Storage Method**: Always Inline (not tracked via GitX)
-- **Special Handling**: For secrets stored in `harnessSecretManager`, the value cannot be migrated and is set to "changeme" as a placeholder
-  - **harnessSecretManager Identification**: The `secretManagerIdentifier` field is located in `spec.secretManagerIdentifier` (not at top level)
-  - **harnessSecretManager Variants**: 
-    - `harnessSecretManager` (project level)
-    - `account.harnessSecretManager` (account level)
-    - `org.harnessSecretManager` (org level)
-  - All three variants are detected and handled the same way (value set to "changeme")
-- **Data Extraction**: Extract from `secret` key in list response (may also be in `resource` or directly in `data`)
-- **Export**: Secrets are exported as JSON files (sensitive values are redacted)
-
-### Environments
-- `GET /ng/api/environmentsV2` - List environments
-- `GET /ng/api/environmentsV2/{identifier}` - Get environment
-- `POST /ng/api/environmentsV2` - Create environment (for inline resources, JSON body with yaml, identifier, type, name, etc.)
-- `POST /ng/api/environmentsV2/import` - Import environment from GitX (query parameters only: accountIdentifier, environmentIdentifier, connectorRef, repoName, branch, filePath)
-
-### Infrastructures
-- `GET /ng/api/infrastructures` - List infrastructures
-- `GET /ng/api/infrastructures/{identifier}` - Get infrastructure (requires environmentIdentifier parameter)
-- `POST /ng/api/infrastructures` - Create infrastructure (for inline resources, JSON body with yaml, accountId, etc.)
-- `POST /ng/api/infrastructures/import` - Import infrastructure from GitX (query parameters only: accountIdentifier, repoName, branch, filePath)
-
-### Services
-- `GET /ng/api/servicesV2` - List services
-- `GET /ng/api/servicesV2/{identifier}` - Get service
-- `POST /ng/api/servicesV2` - Create service (for inline resources, JSON body with yaml, identifier, name, accountId, orgIdentifier, projectIdentifier)
-- `POST /ng/api/servicesV2/import` - Import service from GitX (query parameters only: accountIdentifier, serviceIdentifier, connectorRef, repoName, branch, filePath)
-
-### Pipelines
-- **Scope**: Project-level only (pipelines only exist at the project level)
-- `POST /pipeline/api/pipelines/list` - List pipelines
-- `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
-- `POST /v1/orgs/{org}/projects/{project}/pipelines` - Create pipeline (for inline resources, JSON body with pipeline_yaml, identifier, name, accountId, orgIdentifier, projectIdentifier, tags)
-- `POST /pipeline/api/pipelines/import` - Import pipeline from GitX (query parameters: orgIdentifier, projectIdentifier, repoName, branch, filePath, connectorRef; JSON body: pipelineDescription)
-- **Migration Pattern**: Uses `_get_project_scopes()` to only iterate through project-level scopes
-
-### Input Sets
-- **Storage Method**: Can be GitX or Inline (inherits from parent pipeline - if pipeline is GitX, input set is also GitX)
-- **Scope**: Project-level only (child entities of pipelines, which only exist at project level)
-- **Child Entity**: Input sets are child entities of pipelines and must be migrated after their parent pipeline
-- `GET /pipeline/api/inputSets` - List input sets for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
-- `GET /pipeline/api/inputSets/{identifier}` - Get input set data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
-- `POST /pipeline/api/inputSets` - Create input set (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"inputSet": {...}}`)
-- `POST /pipeline/api/inputSets/import/{identifier}` - Import input set from GitX (query parameters: accountIdentifier, pipelineIdentifier, orgIdentifier, projectIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath; JSON body: `{"inputSetName": "...", "inputSetDescription": "..."}`)
-- **Data Extraction**: 
-  - Get response: Extract full data dict from `data` key (not nested under `inputSet` key)
-  - YAML content: Extract YAML string from `data.inputSetYaml` field
-  - List response: Extract from `inputSet` key in list response
-- **GitX Detection**: Input sets inherit GitX storage from their parent pipeline - if pipeline is GitX, input set is also GitX
-- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates input sets for each pipeline. For GitX input sets, uses import endpoint with git details. For inline input sets, parses YAML and uses create endpoint.
-
-### Triggers
-- **Storage Method**: Always Inline (NOT stored in GitX, even when parent pipeline is stored in GitX)
-- **Scope**: Project-level only (child entities of pipelines, which only exist at project level)
-- **Child Entity**: Triggers are child entities of pipelines and must be migrated after their parent pipeline and input sets (triggers may reference input sets)
-- `GET /pipeline/api/triggers` - List triggers for a pipeline (query parameters: `routingId`, `accountIdentifier`, `orgIdentifier`, `projectIdentifier`, `targetIdentifier` (pipeline identifier), `size`, `page`, `sort`)
-- `GET /pipeline/api/triggers/{identifier}/details` - Get trigger data (query parameters: `routingId`, `accountIdentifier`, `orgIdentifier`, `projectIdentifier`, `targetIdentifier` (pipeline identifier))
-- `POST /pipeline/api/triggers` - Create trigger (query parameters: `routingId`, `accountIdentifier`, `targetIdentifier` (pipeline identifier), `orgIdentifier`, `projectIdentifier`, `ignoreError`, `storeType`; Content-Type: `application/yaml`; body: raw YAML content)
-- **Data Extraction**: 
-  - List response: Triggers are **NOT nested** under a `trigger` key - data is directly in the list items (unlike most other resources)
-  - Get response: Trigger data is directly in `data` key (not nested under `trigger` key)
-  - YAML content: Extract YAML string from `yaml` field in trigger data
-- **Important**: Triggers use `targetIdentifier` (not `pipelineIdentifier`) in query parameters for all endpoints
-- **Migration Pattern**: Uses `_get_project_scopes()` to iterate through project-level scopes, then iterates through pipelines and migrates triggers for each pipeline. Always uses inline creation (never GitX import).
-
-### Templates
-- **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
-- **Versioning**: Templates are versioned resources. Each template can have multiple versions, and all versions must be migrated.
-- **List Templates**: `POST /template/api/templates/list-metadata` (query parameters: routingId, accountIdentifier, templateListType, page, size, sort, checkReferenced; JSON body: filterType)
-- **Get Template Versions**: Uses same `list-metadata` endpoint with `templateIdentifiers` filter in JSON body (query parameters: routingId, accountIdentifier, module, templateListType, size)
-- **Get Template Data**: `GET /template/api/templates/{identifier}` (query parameters: versionLabel, orgIdentifier, projectIdentifier)
-- **Create Template**: `POST /template/api/templates` (for inline resources, query parameters: accountIdentifier, isNewTemplate, storeType, comments, orgIdentifier, projectIdentifier; Content-Type: application/yaml; body: raw YAML content)
-- **Import Template**: `POST /template/api/templates/import/{identifier}` (query parameters: accountIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath, orgIdentifier, projectIdentifier; JSON body: templateDescription, templateVersion, templateName)
-- `POST /template/api/templates/list-metadata` - List templates (query parameters: routingId, accountIdentifier, templateListType, page, size, sort, checkReferenced; JSON body: filterType)
-- `POST /template/api/templates/list-metadata` - Get template versions (query parameters: routingId, accountIdentifier, module, templateListType, size; JSON body: filterType, templateIdentifiers)
-- `GET /template/api/templates/{identifier}` - Get template data for specific version (query parameters: versionLabel, orgIdentifier, projectIdentifier)
-- `POST /template/api/templates` - Create template (for inline resources, query parameters: accountIdentifier, isNewTemplate, storeType, comments, orgIdentifier, projectIdentifier; Content-Type: application/yaml; body: raw YAML content)
-- `POST /template/api/templates/import/{identifier}` - Import template from GitX (query parameters: accountIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath, orgIdentifier, projectIdentifier; JSON body: templateDescription, templateVersion, templateName)
-
-## Common Patterns
-
-### Harness API List Response Pattern
-
-**Critical Pattern**: Harness API list endpoints return resources in a nested structure where each item in the list contains the resource data under a key matching the resource name.
-
-**List Response Format**:
-```json
-[
-  {
-    "resourceName": {
-      "identifier": "...",
-      "name": "...",
-      // ... other resource fields
-    }
-  },
-  // ... more resources
-]
-```
-
-**Example**: For infrastructures, the response looks like:
-```json
-[
-  {
-    "infrastructure": {
-      "identifier": "my-infra",
-      "name": "My Infrastructure",
-      "envIdentifier": "my-env"
-    }
-  }
-]
-```
-
-**Not**:
-```json
-[
-  {
-    "identifier": "my-infra",
-    "name": "My Infrastructure",
-    "envIdentifier": "my-env"
-  }
-]
-```
-
-**Required Pattern for All List Iterations**:
-When iterating through list responses, **always** extract the resource data from the nested key:
-
-```python
-for item in list_response:
-    # Extract from key matching resource name, fallback to item itself
-    resource_item = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'infrastructure'
-    identifier = resource_item.get('identifier', '')
-    name = resource_item.get('name', identifier)
-    # ... use resource_item for all data access
-```
-
-**Why This Pattern Exists**:
-- Harness API uses this structure to include metadata alongside resource data
-- The nested key allows for future API extensions without breaking changes
-- Some resources may include additional fields at the top level alongside the resource object
-
-**Resources Using This Pattern**:
-- **Connectors**: `item.get('connector', item)`
-- **Environments**: `item.get('environment', item)`
-- **Infrastructures**: `item.get('infrastructure', item)`
-- **Services**: `item.get('service', item)`
-- **Pipelines**: `item.get('pipeline', item)`
-- **Templates**: `item.get('template', item)` (note: template list responses may not use nested structure)
-- **Projects**: `item.get('project', item)`
-- **Organizations**: `item.get('organization', item)`
-- **Secrets**: `item.get('secret', item)` (v2 API may return secrets in nested structure)
-- **Input Sets**: `item.get('inputSet', item)` (in list response)
-- **Triggers**: **Exception** - Triggers in list response are **NOT nested** - data is directly in the list item (no `trigger` key)
-
-**Important**: Always use the fallback pattern `item.get('resourceName', item)` to handle cases where the API might return the data directly (for backward compatibility or different API versions).
-
-### Adding a New Resource Type
-
-**Important**: First determine if the resource uses GitX (YAML) or Inline (data fields) storage. Many resources support both, so you'll need to detect and handle both cases.
-
-#### For Resources That Support Both GitX and Inline:
-
-1. Add list method to `HarnessAPIClient`:
-   ```python
-   def list_new_resource(self, org_id=None, project_id=None):
-       endpoint = "/ng/api/new-resource"
-       # ... implementation
-   ```
-
-2. Add get data method (for detection and data extraction):
-   ```python
-   def get_new_resource_data(self, identifier, org_id=None, project_id=None):
-       endpoint = f"/ng/api/new-resource/{identifier}"
-       # ... implementation - returns full resource data dict
-       # IMPORTANT: Extract from nested key if present (e.g., data.get('data', {}).get('newResource', data.get('data', {})))
-   ```
-
-3. Add get YAML method (wrapper around get_data):
-   ```python
-   def get_new_resource_yaml(self, identifier, org_id=None, project_id=None):
-       resource_data = self.get_new_resource_data(identifier, org_id, project_id)
-       if resource_data:
-           return resource_data.get('yaml', '')
-       return None
-   ```
-
-4. Add create method (for inline resources):
-   ```python
-   def create_new_resource(self, yaml_content, identifier, name, type=None, org_id=None, project_id=None):
-       endpoint = "/ng/api/new-resource"
-       params = {}
-       if org_id:
-           params['orgIdentifier'] = org_id
-       if project_id:
-           params['projectIdentifier'] = project_id
-       
-       # Build JSON payload with YAML content and identifiers
-       data = {
-           'yaml': yaml_content,
-           'accountId': self.account_id,
-           'identifier': identifier,
-           'name': name,
-           'orgIdentifier': org_id,  # Always include, may be None
-           'projectIdentifier': project_id  # Always include, may be None
-       }
-       # Add resource-specific fields if needed (e.g., type for environments)
-       if type:
-           data['type'] = type
-       # Add additional resource-specific fields (e.g., environmentIdentifier for infrastructures)
-       
-       response = self._make_request('POST', endpoint, params=params, data=data)
-       # ... implementation
-   ```
-
-5. Add import method (for GitX resources only - uses query parameters, not request body):
-   ```python
-   def import_new_resource_yaml(self, git_details, resource_identifier=None, connector_ref=None, org_id=None, project_id=None):
-       endpoint = "/ng/api/new-resource/import"
-       params = {
-           'accountIdentifier': self.account_id
-       }
-       # Add resource identifier if required by API
-       if resource_identifier:
-           params['newResourceIdentifier'] = resource_identifier
-       if org_id:
-           params['orgIdentifier'] = org_id
-       if project_id:
-           params['projectIdentifier'] = project_id
-       if connector_ref:
-           params['connectorRef'] = connector_ref
-       
-       # Add git details fields to query parameters (required: repoName, branch, filePath)
-       if 'repoName' in git_details:
-           params['repoName'] = git_details['repoName']
-       if 'branch' in git_details:
-           params['branch'] = git_details['branch']
-       if 'filePath' in git_details:
-           params['filePath'] = git_details['filePath']
-       
-       # No data body for GitX import
-       response = self._make_request('POST', endpoint, params=params, data=None)
-       # ... implementation
-   ```
-
-6. Add migration method to `HarnessMigrator`:
-   ```python
-   def migrate_new_resources(self):
-       scopes = self._get_all_scopes()
-       for org_id, project_id in scopes:
-           resources = self.source_client.list_new_resource(org_id, project_id)
-           for resource in resources:
-               # CRITICAL: Extract from nested key matching resource name (singular form)
-               # Harness API always returns list items as: [{'resourceName': {<data>}}]
-               resource_item = resource.get('newResource', resource)  # e.g., 'connector', 'environment', 'infrastructure'
-               identifier = resource_item.get('identifier', '')
-               name = resource_item.get('name', identifier)
-               
-               # Get full resource data
-               resource_data = self.source_client.get_new_resource_data(identifier, org_id, project_id)
-               
-               if not resource_data:
-                   print(f"  Failed to get data for {name}")
-                   results['failed'] += 1
-                   continue
-               
-               # Detect storage type
-               is_gitx = self.source_client.is_gitx_resource(resource_data)
-               storage_type = "GitX" if is_gitx else "Inline"
-               
-               # Export YAML for backup
-               yaml_content = resource_data.get('yaml', '')  # or 'yamlPipeline' for pipelines
-               # ... export logic
-               
-               if is_gitx:
-                   # GitX: Extract git details and use import endpoint
-                   git_details = resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})
-                   if not git_details:
-                       print(f"  Failed to get git details for GitX {name}")
-                       results['failed'] += 1
-                       continue
-                   connector_ref = resource_data.get('connectorRef')  # If applicable
-                   # Import with git details via query parameters
-                   if self.dest_client.import_new_resource_yaml(
-                       git_details=git_details, resource_identifier=identifier,
-                       connector_ref=connector_ref, org_id=org_id, project_id=project_id
-                   ):
-                       results['success'] += 1
-                   else:
-                       results['failed'] += 1
-               else:
-                   # Inline: Extract YAML and metadata, use create endpoint
-                   if not yaml_content:
-                       print(f"  Failed to get YAML for inline {name}")
-                       results['failed'] += 1
-                       continue
-                   # Extract resource-specific fields (e.g., type for environments)
-                   resource_type = resource_data.get('type')  # If applicable (e.g., for environments)
-                   # Create with YAML content and metadata via JSON body
-                   # Most resources require identifier and name; some may require additional fields
-                   if self.dest_client.create_new_resource(
-                       yaml_content=yaml_content, identifier=identifier, name=name,
-                       type=resource_type,  # Pass None if not applicable
-                       org_id=org_id, project_id=project_id
-                   ):
-                       results['success'] += 1
-                   else:
-                       results['failed'] += 1
-   ```
-
-7. Add to `migrate_all()` and command-line choices
-
-### Important Implementation Details for Create Methods
-
-**For Inline Resources (create endpoints)**:
-- Use `POST /ng/api/{resource}` endpoint (not the import endpoint)
-- Send JSON body with `Content-Type: application/json` (handled automatically by `_make_request`)
-- Required fields in JSON body:
-  - `yaml`: The YAML content as a string
-  - `accountId`: Account identifier
-  - Additional fields vary by resource type:
-    - **Environments**: Requires `identifier`, `type`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
-    - **Services**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body
-    - **Infrastructures**: Requires `environmentIdentifier` in JSON body (and query params), plus `orgIdentifier`, `projectIdentifier` (check API docs for exact field names)
-    - **Pipelines**: Requires `identifier`, `name`, `orgIdentifier`, `projectIdentifier` in JSON body. Uses `pipeline_yaml` field (not `yaml`) for YAML content. Optionally includes `tags` field extracted from YAML document.
-    - **Templates**: Uses raw YAML content in request body (not JSON). Content-Type: `application/yaml`. Query parameters: `isNewTemplate`, `storeType`, `comments`. YAML content must include `identifier`, `name`, `versionLabel` in the YAML structure. Optionally includes `tags` extracted from YAML document.
-    - Note: Some resources may have different field name conventions (e.g., `organizationId` vs `orgIdentifier`)
-
-**Resource-Specific Notes**:
-- **Environments**: Most complex - requires `identifier`, `type`, and `name` in addition to YAML
-- **Services**: Requires `identifier` and `name` in addition to YAML (similar to environments but without `type`)
-- **Infrastructures**: Require `environmentIdentifier` in both query parameters and JSON body when creating
-- **Pipelines**: 
-  - Use `yamlPipeline` field name when extracting YAML from response data
-  - Use `pipeline_yaml` field name (not `yaml`) when sending YAML content in create API
-  - Extract `tags` from parsed YAML document (from `pipeline.tags` or root `tags` field) and include in create API
-  - Extract `description` or `pipelineDescription` from pipeline data for GitX imports
-- **Templates**:
-  - Use `yaml` or `templateYaml` field name when extracting YAML from response data
-  - Send raw YAML content directly in request body (not wrapped in JSON) for create API
-  - Use `Content-Type: application/yaml` header for create API (similar to connectors)
-  - Extract `tags` from parsed YAML document (from `template.tags` or root `tags` field) - tags are included in YAML content itself
-  - Extract `description` or `templateDescription` from template data for GitX imports
-  - **Versioning**: Templates are versioned. Use `list-metadata` endpoint with `templateIdentifiers` filter to get all versions. Each version has a `versionLabel` field. Migrate all versions of each template.
-  - **Get Template Data**: Requires `versionLabel` query parameter (not `version`)
-  - **Import Endpoint**: Template identifier is in URL path: `/template/api/templates/import/{identifier}`
-  - **Import Query Parameters**: Includes `isHarnessCodeRepo` (defaults to `false` if not present)
-- **General Pattern**: Most inline resources require `identifier` and `name` fields extracted from source resource data
-
-### Important Implementation Details for Import Methods (GitX)
-
-**For GitX Resources (import endpoints)**:
-- Use `POST /ng/api/{resource}/import` endpoint (or resource-specific endpoint like `/pipeline/api/pipelines/import`)
-- **Most resources**: All data sent as query parameters (no request body)
-- **Pipelines**: Uses both query parameters and JSON body
-- Required query parameters:
-  - `accountIdentifier`: Account identifier (required for most resources, not for pipelines)
-  - `{resource}Identifier`: Resource identifier (required for environments)
-  - `repoName`: Repository name (from git details)
-  - `branch`: Branch name (from git details)
-  - `filePath`: File path (from git details)
-- Optional query parameters:
-  - `orgIdentifier`: Organization identifier (if applicable)
-  - `projectIdentifier`: Project identifier (if applicable)
-  - `connectorRef`: Connector reference (for environments and pipelines, if present in source)
-- **Pipelines JSON body**:
-  - `pipelineDescription`: Pipeline description (always included, even if empty string)
-- **Templates JSON body**:
-  - `templateDescription`: Template description (always included, may be empty string)
-  - `templateVersion`: Template version label (required)
-  - `templateName`: Template name (required)
-
-### Extracting Nested Data from Get Responses
-
-When implementing `get_*_data()` methods, always check for nested keys in the response:
-```python
-def get_new_resource_data(self, identifier, org_id=None, project_id=None):
-    endpoint = f"/ng/api/new-resource/{identifier}"
-    response = self._make_request('GET', endpoint, params=params)
-    if response.status_code == 200:
-        data = response.json()
-        # Extract from nested key if present, fallback to 'data' itself
-        resource_data = data.get('data', {}).get('newResource', data.get('data', {}))
-        return resource_data
-    return None
-```
-
-Common nested keys:
-- Environments: `data.environment`
-- Services: `data.service`
-- Projects: `data.project`
-- Organizations: `data.organization`
-- Connectors: `data.connector` (or directly in `data`)
-- Pipelines: `data.pipeline`
-- Templates: `data.template`
-
-#### Pattern for Extracting Nested Data from List Responses:
-
-**This is a universal pattern for ALL Harness list APIs**. When iterating through list responses, **always** extract the actual resource data from nested keys:
-
-```python
-for item in list_response:
-    # CRITICAL: Extract from key matching resource name, fallback to item itself
-    # The key name matches the resource type (singular form)
-    resource_data = item.get('resourceName', item)  # e.g., 'connector', 'environment', 'infrastructure', 'service', 'pipeline'
-    identifier = resource_data.get('identifier', '')
-    name = resource_data.get('name', identifier)
-    # ... always use resource_data for all field access, never use item directly
-```
-
-**Common Mistakes to Avoid**:
-- ❌ **Don't do**: `identifier = item.get('identifier', '')` - this will fail because the identifier is nested
-- ✅ **Do**: `resource_item = item.get('infrastructure', item); identifier = resource_item.get('identifier', '')`
-- ❌ **Don't assume**: The list contains flat objects
-- ✅ **Always assume**: The list contains objects with nested resource data under a key matching the resource name
-
-### Handling Special Cases
-
-- **Nested Data Extraction in List Responses**: **MOST** Harness list APIs return resources nested under a key matching the resource name. This is a common pattern:
-  - **Connectors**: Extract from `connector` key: `connector.get('connector', connector)`
-  - **Projects**: Extract from `project` key: `project.get('project', project)`
-  - **Organizations**: Extract from `organization` key: `org.get('organization', org)`
-  - **Environments**: Extract from `environment` key: `env.get('environment', env)`
-  - **Infrastructures**: Extract from `infrastructure` key: `infra.get('infrastructure', infra)`
-  - **Services**: Extract from `service` key: `service.get('service', service)`
-  - **Pipelines**: Extract from `pipeline` key: `pipeline.get('pipeline', pipeline)`
-  - **Input Sets**: Extract from `inputSet` key: `input_set.get('inputSet', input_set)`
-  - **Templates**: Template list responses may return flat objects (not nested). Check response structure and extract accordingly.
-  - **Triggers**: **Exception** - Triggers in list response are **NOT nested** - access fields directly from the list item (no `trigger` key)
-  - **Always use fallback pattern**: `item.get('resourceName', item)` to handle cases where the key might not exist
-  - **Never access fields directly** from the list item - always extract from the nested key first (except for templates and triggers which may be flat)
-- **Nested Data Extraction in Get Responses**: When getting individual resource data, extract from nested structure:
-  - Use pattern: `data.get('data', {}).get('resourceName', data.get('data', {}))`
-  - Example: `data.get('data', {}).get('environment', data.get('data', {}))`
-- **Infrastructures**: Require `environmentIdentifier` parameter when getting individual infrastructure data
-- **Pipelines**: YAML field is named `yamlPipeline` instead of `yaml` in the response
-- **Input Sets**: 
-  - YAML field is named `inputSetYaml` in the get response (located in `data.inputSetYaml`)
-  - Can be stored in GitX (inherits from parent pipeline - if pipeline is GitX, input set is also GitX)
-  - For GitX input sets, use import endpoint with git details and JSON body containing `inputSetName` and `inputSetDescription`
-  - For inline input sets, parse YAML and use create endpoint with JSON body containing `{"inputSet": {...}}`
-  - Get response returns full data dict (not just YAML string) for GitX/Inline detection
-- **Triggers**: 
-  - YAML field is named `yaml` in the get response (located in `data.yaml`)
-  - Always inline (NOT stored in GitX, even when parent pipeline is stored in GitX)
-  - Use `targetIdentifier` (not `pipelineIdentifier`) in query parameters for all endpoints
-  - Get endpoint requires `/details` suffix: `/pipeline/api/triggers/{identifier}/details`
-  - List endpoint requires `routingId` and `accountIdentifier` query parameters (in addition to `targetIdentifier`)
-  - Create endpoint uses raw YAML with `Content-Type: application/yaml` and requires `storeType: INLINE`, `ignoreError`, `routingId`, `accountIdentifier`, `targetIdentifier`
-  - Triggers in list response are NOT nested under a `trigger` key (unlike most other resources) - access fields directly
-- **Templates**: 
-  - YAML field may be `yaml` or `templateYaml` in the response
-  - Version information is in `versionLabel` field (not `version`)
-  - Use `list-metadata` endpoint with `templateIdentifiers` filter to get all versions (not a separate versions endpoint)
-  - Template identifier is included in import URL path: `/template/api/templates/import/{identifier}`
-  - Create API uses raw YAML with `Content-Type: application/yaml` (like connectors)
-  - Query parameter `isNewTemplate` should be `false` for updating existing templates
-- **Git Details Field Names**: 
-  - Environments and Services use `entityGitDetails` field
-  - Templates may use `gitDetails` or `entityGitDetails` field
-  - Other resources may use `gitDetails` field
-  - Check both when extracting: `resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})`
-- **Secrets Special Fields**:
-  - `secretManagerIdentifier` is located in `spec.secretManagerIdentifier` (not at top level)
-  - Check for harnessSecretManager variants: `harnessSecretManager`, `account.harnessSecretManager`, `org.harnessSecretManager`
-  - Value field is in `spec.value` and should be set to "changeme" for harnessSecretManager secrets
-  - Always check `cleaned_data.get('spec', {}).get('secretManagerIdentifier', '')` when identifying secret manager type
-- **Secrets Special Fields**:
-  - `secretManagerIdentifier` is located in `spec.secretManagerIdentifier` (not at top level)
-  - Check for harnessSecretManager variants: `harnessSecretManager`, `account.harnessSecretManager`, `org.harnessSecretManager`
-  - Value field is in `spec.value` and should be set to "changeme" for harnessSecretManager secrets
-
-### Detecting GitX vs Inline Storage
-
-The `is_gitx_resource()` method automatically detects storage method by checking resource metadata:
-
-1. **Check for `storeType` field** in resource response:
-   - `storeType: "REMOTE"` = GitX (use git details in import API)
-   - `storeType: "INLINE"` = Inline (use YAML content in import API)
-
-2. **Check for `gitDetails` field**:
-   - Presence of `gitDetails` indicates GitX resource
-   - Used to import from git location
-
-3. **Check for git-related fields**:
-   - Fields like `repo`, `branch` indicate GitX
-   - Absence suggests Inline
-
-4. **Check for `yaml` field**:
-   - Both GitX and Inline resources may have YAML content
-   - For Inline: YAML content is used directly in import
-   - For GitX: git details are used, YAML is for export only
-
-**Current Implementation**:
-```python
-def is_gitx_resource(self, resource_data: Dict) -> bool:
-    """Determine if resource is stored in GitX or Inline"""
-    # Check storeType field
-    if resource_data.get('storeType') == 'REMOTE':
-        return True
-    if resource_data.get('storeType') == 'INLINE':
-        return False
-    
-    # Check for gitDetails field
-    if 'gitDetails' in resource_data and resource_data.get('gitDetails'):
-        return True
-    
-    # Check for git-related fields
-    if 'repo' in resource_data or 'branch' in resource_data:
-        return True
-    
-    # Default: assume Inline if no indicators found
-    return False
-```
-
-### Connectors (Special Case)
-
-- **Storage Method**: Always Inline (not stored in GitX)
-- **Migration Approach**: Create API with YAML content directly in request body
-- **API Endpoint**: `POST /ng/api/connectors` with YAML content as request body
-- **Content-Type**: `text/yaml` (not `application/json`)
-- **Note**: Connectors do NOT use the import API, they use the create API with YAML content
-
-### Templates (Special Case - Versioned Resources with Dependency Order)
-
-- **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
-- **Versioning**: Templates are versioned resources. Each template can have multiple versions (identified by `versionLabel`), and all versions must be migrated.
-- **Template Type Detection**: Templates have a `templateEntityType` field that indicates the type (e.g., "Pipeline", "Stage", "Step", "StepGroup", "SecretManager", "MonitoredService", "DeploymentTemplate", "ArtifactSource")
-- **Dependency Order**: Templates must be migrated in a specific order based on dependencies (referenced templates must be migrated first):
-  - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)
-  - **Deployment Template** and **Artifact Source templates**: Migrated second (before services and environments)
-  - **Step templates** and **MonitoredService templates**: Migrated third (no dependencies, can be referenced by Stage templates)
-  - **Step Group templates**: Migrated fourth (can be referenced by Stage templates)
-  - **Stage templates**: Migrated fifth (can reference Step, MonitoredService, and StepGroup templates)
-  - **Pipeline templates**: Migrated sixth (can reference Stage and SecretManager templates)
-  - **Other template types**: Migrated last (in any order)
-- **List Templates**: Uses `POST /template/api/templates/list-metadata` with `templateListType=LastUpdated` to get all templates
-- **Get Versions**: Uses same `list-metadata` endpoint with `templateListType=All` and `templateIdentifiers` filter in JSON body to get all versions of a specific template
-- **Version Extraction**: Extract `versionLabel` field from each entry in the list response (not a separate versions endpoint)
-- **Get Template Data**: Requires `versionLabel` query parameter (not `version`) to get data for a specific version
-- **Create Template**: 
-  - Uses `POST /template/api/templates` with raw YAML content (not JSON-wrapped)
-  - Content-Type: `application/yaml` (similar to connectors)
-  - Query parameters: `isNewTemplate=false` (for updating existing templates), `storeType=INLINE`, `comments=`
-  - YAML content must include `identifier`, `name`, `versionLabel` in the YAML structure itself
-- **Import Template**:
-  - Endpoint: `POST /template/api/templates/import/{identifier}` (template identifier in URL path)
-  - Query parameters: `connectorRef`, `isHarnessCodeRepo` (defaults to `false`), `repoName`, `branch`, `filePath`
-  - JSON body: `templateDescription`, `templateVersion` (version label), `templateName`
-- **Migration Pattern**: 
-  1. Group templates by `templateEntityType` field
-  2. Migrate SecretManager templates first (via `migrate_secret_manager_templates()`)
-  3. Migrate Deployment Template and Artifact Source templates (via `migrate_deployment_and_artifact_source_templates()`)
-  4. Migrate other templates in dependency order (Step/MonitoredService → StepGroup → Stage → Pipeline → Others)
-  5. For each template, get all versions using `get_template_versions()`
-  6. For each version, get template data and detect storage type
-  7. Migrate each version separately (inline or GitX based on storage type)
-  8. Export files include version in filename: `template_{identifier}_v{version}_...`
-
 ## Testing and Validation
 
 - Use dry-run mode to test without making changes
@@ -875,51 +354,15 @@ def is_gitx_resource(self, resource_data: Dict) -> bool:
 
 ### Planned Improvements
 
-1. **Retry Logic**
-   - Automatic retry for failed API calls
-   - Exponential backoff for rate limiting
-   - Configurable retry attempts and delays
-
-3. **Dependency Graph Analysis**
-   - Build dependency graph of resources
-   - Validate dependencies before migration
-   - Provide warnings for missing dependencies
-   - Suggest migration order based on dependencies
-
-4. **Incremental Migration Support**
-   - Track already-migrated resources
-   - Skip resources that already exist in destination
-   - Support for partial migrations and resume capability
-
-5. **Progress Persistence**
-   - Save migration state to file
-   - Resume interrupted migrations
-   - Track success/failure per resource
-
-6. **Parallel Migration**
-   - Migrate independent resources in parallel
-   - Respect dependency order while parallelizing
-   - Configurable concurrency limits
-
-7. **Validation of Migrated Resources**
-   - Verify resources were created correctly
-   - Compare source and destination resource configurations
-   - Generate validation report
-
-8. **Enhanced Error Reporting**
-   - Detailed error messages with context
-   - Suggestions for resolving common errors
-   - Export error details to file
-
-9. **Resource Filtering**
-   - Filter by tags, labels, or metadata
-   - Exclude specific resources from migration
-   - Include only resources matching criteria
-
-10. **Dry-Run Enhancements**
-    - Show dependency graph in dry-run mode
-    - Estimate migration time
-    - Identify potential issues before migration
+1. **Retry Logic**: Automatic retry for failed API calls with exponential backoff
+2. **Dependency Graph Analysis**: Build dependency graph, validate dependencies, provide warnings
+3. **Incremental Migration Support**: Track already-migrated resources, skip existing resources
+4. **Progress Persistence**: Save migration state, resume interrupted migrations
+5. **Parallel Migration**: Migrate independent resources in parallel while respecting dependencies
+6. **Validation of Migrated Resources**: Verify resources were created correctly
+7. **Enhanced Error Reporting**: Detailed error messages with context and suggestions
+8. **Resource Filtering**: Filter by tags, labels, or metadata
+9. **Dry-Run Enhancements**: Show dependency graph, estimate migration time, identify potential issues
 
 ### Roadmap
 
@@ -952,3 +395,5 @@ def is_gitx_resource(self, resource_data: Dict) -> bool:
 
 - [Harness API Documentation](https://apidocs.harness.io/)
 - [Harness Developer Hub](https://developer.harness.io/)
+- See `api-notes.md` for detailed API endpoint information
+- See `implementation-notes.md` for implementation-specific details and quirks

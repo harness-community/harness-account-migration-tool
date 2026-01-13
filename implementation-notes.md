@@ -1,0 +1,189 @@
+# Implementation Notes - Harness Account Migration Tool
+
+This file contains implementation-specific details, quirks, and special handling cases for the Harness Account Migration Tool. For generic implementation guidance, see `AGENTS.md`. For API endpoint details, see `api-notes.md`.
+
+## Data Extraction Patterns
+
+### List Response Structure
+**Critical Pattern**: Most Harness list APIs return resources nested under a key matching the resource name (singular form).
+
+**Pattern**:
+```json
+[
+  {
+    "resourceName": {
+      "identifier": "...",
+      "name": "...",
+      // ... other fields
+    }
+  }
+]
+```
+
+**Resources Using This Pattern**:
+- Connectors: `item.get('connector', item)`
+- Environments: `item.get('environment', item)`
+- Infrastructures: `item.get('infrastructure', item)`
+- Services: `item.get('service', item)`
+- Pipelines: `item.get('pipeline', item)`
+- Projects: `item.get('project', item)`
+- Organizations: `item.get('organization', item)`
+- Secrets: `item.get('secret', item)` (v2 API)
+- Input Sets: `item.get('inputSet', item)`
+
+**Exceptions**:
+- **Templates**: May return flat objects (check response structure)
+- **Triggers**: NOT nested - data is directly in list items (no `trigger` key)
+
+### Get Response Structure
+When getting individual resource data, extract from nested structure:
+```python
+data.get('data', {}).get('resourceName', data.get('data', {}))
+```
+
+**Common nested keys**:
+- Environments: `data.environment`
+- Services: `data.service`
+- Projects: `data.project`
+- Organizations: `data.organization`
+- Connectors: `data.connector` (or directly in `data`)
+- Pipelines: `data.pipeline`
+- Templates: `data.template`
+- Triggers: Directly in `data` (not nested under `trigger`)
+
+## Field Name Variations
+
+### YAML Content Fields
+Different resources use different field names for YAML content:
+- Most resources: `yaml`
+- Pipelines: `yamlPipeline` (in response), `pipeline_yaml` (in create request)
+- Templates: `yaml` or `templateYaml`
+- Input Sets: `inputSetYaml` (in get response)
+- Triggers: `yaml`
+
+### Git Details Fields
+- Environments and Services: `entityGitDetails`
+- Templates: `gitDetails` or `entityGitDetails`
+- Other resources: `gitDetails`
+- **Always check both**: `resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})`
+
+### Identifier Fields
+- Most resources: `identifier`
+- Triggers: Use `targetIdentifier` (not `pipelineIdentifier`) in query parameters for all endpoints
+
+### Version Fields
+- Templates: `versionLabel` (not `version`)
+
+## Special Handling Cases
+
+### Secrets
+- **API Version**: Uses v2 API endpoints
+- **Pagination**: Uses `pageIndex` and `pageSize` (not `page` and `size`)
+- **Query Parameters**: Requires `routingId` (account identifier) and `sortOrders` for listing
+- **Storage Method**: Always Inline (not tracked via GitX)
+- **harnessSecretManager Identification**:
+  - Field location: `spec.secretManagerIdentifier` (not at top level)
+  - Variants: `harnessSecretManager`, `account.harnessSecretManager`, `org.harnessSecretManager`
+  - Value handling: Set `spec.value` to "changeme" for harnessSecretManager secrets
+  - Check: `cleaned_data.get('spec', {}).get('secretManagerIdentifier', '')`
+- **Data Extraction**: Extract from `secret` key in list response (may also be in `resource` or directly in `data`)
+- **Export**: Secrets are exported as JSON files (sensitive values are redacted)
+
+### Infrastructures
+- Require `environmentIdentifier` parameter when getting individual infrastructure data
+- Require `environmentIdentifier` in both query parameters and JSON body when creating
+
+### Pipelines
+- **Scope**: Project-level only
+- Use `yamlPipeline` field name when extracting YAML from response data
+- Use `pipeline_yaml` field name (not `yaml`) when sending YAML content in create API
+- Extract `tags` from parsed YAML document (from `pipeline.tags` or root `tags` field) and include in create API
+- Extract `description` or `pipelineDescription` from pipeline data for GitX imports
+
+### Input Sets
+- **Scope**: Project-level only (child entities of pipelines)
+- **Storage Method**: Can be GitX or Inline (inherits from parent pipeline)
+- YAML field: `inputSetYaml` in get response (located in `data.inputSetYaml`)
+- Get response returns full data dict (not just YAML string) for GitX/Inline detection
+- For GitX: Use import endpoint with git details and JSON body containing `inputSetName` and `inputSetDescription`
+- For Inline: Parse YAML and use create endpoint with JSON body containing `{"inputSet": {...}}`
+
+### Triggers
+- **Scope**: Project-level only (child entities of pipelines)
+- **Storage Method**: Always Inline (NOT stored in GitX, even when parent pipeline is GitX)
+- YAML field: `yaml` in get response (located in `data.yaml`)
+- Use `targetIdentifier` (not `pipelineIdentifier`) in query parameters for all endpoints
+- Get endpoint requires `/details` suffix: `/pipeline/api/triggers/{identifier}/details`
+- List endpoint requires `routingId` and `accountIdentifier` query parameters
+- Create endpoint uses raw YAML with `Content-Type: application/yaml` and requires:
+  - Query parameters: `storeType: INLINE`, `ignoreError`, `routingId`, `accountIdentifier`, `targetIdentifier`
+- **List Response**: NOT nested under a `trigger` key - access fields directly from list items
+
+### Templates
+- **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
+- **Versioning**: Templates are versioned - all versions must be migrated
+- YAML field: `yaml` or `templateYaml` in response
+- Version information: `versionLabel` field (not `version`)
+- Use `list-metadata` endpoint with `templateIdentifiers` filter to get all versions (not a separate versions endpoint)
+- Template identifier is included in import URL path: `/template/api/templates/import/{identifier}`
+- Create API uses raw YAML with `Content-Type: application/yaml` (like connectors)
+- Query parameter `isNewTemplate` should be `false` for updating existing templates
+- Import query parameters include `isHarnessCodeRepo` (defaults to `false` if not present)
+- Extract `tags` from parsed YAML document (tags are included in YAML content itself)
+- Extract `description` or `templateDescription` from template data for GitX imports
+
+### Connectors
+- **Storage Method**: Always Inline (not stored in GitX)
+- Use create API with YAML content directly in request body (not import API)
+- Content-Type: `text/yaml` (not `application/json`)
+
+## Storage Method Detection
+
+The `is_gitx_resource()` method detects storage method by checking:
+1. `storeType` field: `REMOTE` = GitX, `INLINE` = Inline
+2. Presence of `gitDetails` or `entityGitDetails` field
+3. Git-related fields (`repo`, `branch`)
+4. Default: Inline if no indicators found
+
+## Content-Type Exceptions
+
+Default: `application/json`
+
+**Exceptions**:
+- Connector creation: `Content-Type: text/yaml`
+- Template creation: `Content-Type: application/yaml`
+- Trigger creation: `Content-Type: application/yaml`
+
+## Pagination Implementation
+
+- **Default page size**: 100 items per page
+- **Parameter names**: Most use `page` and `size`, some use `pageIndex` and `pageSize`
+- **Location**: Query parameters (most) or request body (e.g., pipelines)
+- **Response structure**: Content at `data.content`, metadata at `data.totalPages`, `data.totalElements`
+- **Safety limit**: Maximum 10,000 pages to prevent infinite loops
+- **Custom pagination**: Some APIs (like secrets v2) require custom logic due to different parameter names
+
+## Data Cleaning
+
+- Null values are removed from data structures recursively
+- Read-only fields are removed before creation (for orgs/projects): `createdAt`, `lastModifiedAt`, etc.
+- Connector data is cleaned and wrapped in proper YAML structure
+
+## File Naming Convention
+
+Exported files include scope information:
+- Account level: `resource_identifier_account.yaml`
+- Org level: `resource_identifier_org_ORG_ID.yaml`
+- Project level: `resource_identifier_org_ORG_ID_project_PROJECT_ID.yaml`
+- **Templates**: Include version in filename: `template_identifier_vVERSION_scope_suffix.yaml`
+
+## Rate Limiting
+
+- 0.5 second delay between requests to avoid API throttling
+- Applied after each resource operation
+
+## Error Handling
+
+- API errors are caught and logged
+- Failed resources are counted but don't stop the migration
+- Exported YAML files are saved even if import fails
