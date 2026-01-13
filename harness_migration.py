@@ -1570,8 +1570,135 @@ class HarnessMigrator:
         
         return results
     
+    def _is_custom_secret_manager_connector(self, connector_data: Dict) -> bool:
+        """Check if a connector is a custom secret manager connector (only 'customsecretmanager' type)"""
+        connector_type = connector_data.get('type', '').lower()
+        return connector_type == 'customsecretmanager'
+    
+    def _is_secret_manager_connector(self, connector_data: Dict) -> bool:
+        """Check if a connector is a secret manager connector (excluding custom secret manager)"""
+        # Secret manager connectors typically have a 'type' field that indicates secret manager types
+        # Common secret manager connector types: Vault, AwsSecretManager, AzureKeyVault, GcpKms, etc.
+        # Excludes 'customsecretmanager' which is handled separately
+        connector_type = connector_data.get('type', '').lower()
+        secret_manager_types = [
+            'vault', 'awssecretmanager', 'azurekeyvault', 'gcpkms', 
+            'awssecretsmanager', 'azuresecretmanager'
+        ]
+        return connector_type in secret_manager_types
+    
+    def migrate_custom_secret_manager_connectors(self) -> Dict[str, Any]:
+        """Migrate custom secret manager connectors at all scopes (account, org, project)"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Custom Secret Manager Connectors ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing custom secret manager connectors at {scope_label} ---")
+            
+            connectors = self.source_client.list_connectors(org_id, project_id)
+            
+            for connector in connectors:
+                connector_data = connector.get('connector', connector)
+                
+                # Only process custom secret manager connectors
+                if not self._is_custom_secret_manager_connector(connector_data):
+                    continue
+                
+                identifier = connector_data.get('identifier', '')
+                name = connector_data.get('name', identifier)
+                print(f"\nProcessing custom secret manager connector: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_connector_yaml(
+                    identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for connector {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"connector_secret_manager_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Create connector in destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create custom secret manager connector to destination account")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_connector_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_secret_manager_connectors(self) -> Dict[str, Any]:
+        """Migrate secret manager connectors at all scopes (account, org, project) - excludes custom secret manager"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Secret Manager Connectors ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing secret manager connectors at {scope_label} ---")
+            
+            connectors = self.source_client.list_connectors(org_id, project_id)
+            
+            for connector in connectors:
+                connector_data = connector.get('connector', connector)
+                
+                # Only process secret manager connectors (excluding custom secret manager)
+                if not self._is_secret_manager_connector(connector_data):
+                    continue
+                
+                identifier = connector_data.get('identifier', '')
+                name = connector_data.get('name', identifier)
+                print(f"\nProcessing secret manager connector: {name} ({identifier}) at {scope_label}")
+                
+                yaml_content = self.source_client.get_connector_yaml(
+                    identifier, org_id, project_id
+                )
+                
+                if not yaml_content:
+                    print(f"  Failed to get YAML for connector {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Save exported YAML with scope in filename
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"connector_secret_manager_{identifier}{scope_suffix}.yaml"
+                export_file.write_text(yaml_content)
+                print(f"  Exported YAML to {export_file}")
+                
+                # Create connector in destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create secret manager connector to destination account")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_connector_yaml(
+                        yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_connectors(self) -> Dict[str, Any]:
-        """Migrate connectors at all scopes (account, org, project)"""
+        """Migrate connectors at all scopes (account, org, project), excluding custom secret manager connectors and secret manager connectors"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Connectors ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
@@ -1585,6 +1712,15 @@ class HarnessMigrator:
             
             for connector in connectors:
                 connector_data = connector.get('connector', connector)
+                
+                # Skip custom secret manager connectors and secret manager connectors (they are migrated separately)
+                if self._is_custom_secret_manager_connector(connector_data):
+                    results['skipped'] += 1
+                    continue
+                if self._is_secret_manager_connector(connector_data):
+                    results['skipped'] += 1
+                    continue
+                
                 identifier = connector_data.get('identifier', '')
                 name = connector_data.get('name', identifier)
                 print(f"\nProcessing connector: {name} ({identifier}) at {scope_label}")
@@ -1620,8 +1756,86 @@ class HarnessMigrator:
         
         return results
     
+    def _is_harness_secret_manager_secret(self, secret_data: Dict) -> bool:
+        """Check if a secret is stored in harnessSecretManager"""
+        spec = secret_data.get('spec', {})
+        secret_manager = spec.get('secretManagerIdentifier', '')
+        return (
+            secret_manager == 'harnessSecretManager' or
+            secret_manager == 'account.harnessSecretManager' or
+            secret_manager == 'org.harnessSecretManager'
+        )
+    
+    def migrate_harness_secret_manager_secrets(self) -> Dict[str, Any]:
+        """Migrate secrets stored in harnessSecretManager at all scopes (account, org, project)"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Secrets (harnessSecretManager) ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing harnessSecretManager secrets at {scope_label} ---")
+            
+            secrets = self.source_client.list_secrets(org_id, project_id)
+            
+            for secret in secrets:
+                # Extract secret data from nested structure if present
+                secret_item = secret.get('secret', secret) if isinstance(secret, dict) else secret
+                identifier = secret_item.get('identifier', '') if isinstance(secret_item, dict) else ''
+                name = secret_item.get('name', identifier) if isinstance(secret_item, dict) else identifier
+                
+                # Get full secret data to check secret manager
+                secret_data = self.source_client.get_secret_data(identifier, org_id, project_id)
+                
+                if not secret_data:
+                    continue
+                
+                # Only process secrets stored in harnessSecretManager
+                if not self._is_harness_secret_manager_secret(secret_data):
+                    continue
+                
+                print(f"\nProcessing harnessSecretManager secret: {name} ({identifier}) at {scope_label}")
+                
+                # Export secret data to file for backup (without sensitive values)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"secret_harness_{identifier}{scope_suffix}.json"
+                
+                # Create a safe copy for export (remove sensitive values)
+                export_data = secret_data.copy()
+                if 'spec' in export_data:
+                    export_spec = export_data['spec'].copy()
+                    if 'value' in export_spec:
+                        export_spec['value'] = '***REDACTED***'
+                    export_data['spec'] = export_spec
+                
+                try:
+                    import json
+                    export_file.write_text(json.dumps(export_data, indent=2))
+                    print(f"  Exported secret metadata to {export_file}")
+                except Exception as e:
+                    print(f"  Warning: Failed to export secret metadata: {e}")
+                
+                # Create in destination (skip in dry-run mode)
+                if self.dry_run:
+                    spec = secret_data.get('spec', {})
+                    secret_manager = spec.get('secretManagerIdentifier', 'Unknown')
+                    print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager: {secret_manager})")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_secret(
+                        secret_data=secret_data, org_identifier=org_id, project_identifier=project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_secrets(self) -> Dict[str, Any]:
-        """Migrate secrets at all scopes (account, org, project)"""
+        """Migrate secrets at all scopes (account, org, project), excluding harnessSecretManager secrets"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Secrets ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
@@ -1638,15 +1852,21 @@ class HarnessMigrator:
                 secret_item = secret.get('secret', secret) if isinstance(secret, dict) else secret
                 identifier = secret_item.get('identifier', '') if isinstance(secret_item, dict) else ''
                 name = secret_item.get('name', identifier) if isinstance(secret_item, dict) else identifier
-                print(f"\nProcessing secret: {name} ({identifier}) at {scope_label}")
                 
-                # Get full secret data
+                # Get full secret data to check secret manager
                 secret_data = self.source_client.get_secret_data(identifier, org_id, project_id)
                 
                 if not secret_data:
                     print(f"  Failed to get data for secret {name}")
                     results['failed'] += 1
                     continue
+                
+                # Skip secrets stored in harnessSecretManager (they are migrated separately)
+                if self._is_harness_secret_manager_secret(secret_data):
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing secret: {name} ({identifier}) at {scope_label}")
                 
                 # Export secret data to file for backup (without sensitive values)
                 scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
@@ -1669,18 +1889,7 @@ class HarnessMigrator:
                 
                 # Create in destination (skip in dry-run mode)
                 if self.dry_run:
-                    # secretManagerIdentifier is in spec, not at top level
-                    spec = secret_data.get('spec', {})
-                    secret_manager = spec.get('secretManagerIdentifier', 'Unknown')
-                    is_harness = (
-                        secret_manager == 'harnessSecretManager' or
-                        secret_manager == 'account.harnessSecretManager' or
-                        secret_manager == 'org.harnessSecretManager'
-                    )
-                    if is_harness:
-                        print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager: {secret_manager})")
-                    else:
-                        print(f"  [DRY RUN] Would create secret")
+                    print(f"  [DRY RUN] Would create secret")
                     results['success'] += 1
                 else:
                     if self.dest_client.create_secret(
@@ -2588,16 +2797,29 @@ class HarnessMigrator:
         if 'templates' in resource_types:
             all_results['secret_manager_templates'] = self.migrate_secret_manager_templates()
         
-        # Deployment Template and Artifact Source templates must be migrated before services and environments
-        if 'templates' in resource_types:
-            all_results['deployment_artifact_templates'] = self.migrate_deployment_and_artifact_source_templates()
+        # Custom secret manager connectors must be migrated right after secret manager templates
+        if 'connectors' in resource_types:
+            all_results['custom_secret_manager_connectors'] = self.migrate_custom_secret_manager_connectors()
         
-        # Then migrate other resources
+        # Secrets stored in harnessSecretManager must be migrated before connectors
+        if 'secrets' in resource_types:
+            all_results['harness_secret_manager_secrets'] = self.migrate_harness_secret_manager_secrets()
+        
+        # Secret manager connectors must be migrated after harnessSecretManager secrets, before remaining secrets
+        if 'connectors' in resource_types:
+            all_results['secret_manager_connectors'] = self.migrate_secret_manager_connectors()
+        
+        # Then migrate other secrets (excluding harnessSecretManager secrets) - before regular connectors
+        if 'secrets' in resource_types:
+            all_results['secrets'] = self.migrate_secrets()
+        
+        # Then migrate other connectors (excluding custom secret manager connectors and secret manager connectors)
         if 'connectors' in resource_types:
             all_results['connectors'] = self.migrate_connectors()
         
-        if 'secrets' in resource_types:
-            all_results['secrets'] = self.migrate_secrets()
+        # Deployment Template and Artifact Source templates must be migrated before services and environments
+        if 'templates' in resource_types:
+            all_results['deployment_artifact_templates'] = self.migrate_deployment_and_artifact_source_templates()
         
         if 'environments' in resource_types:
             all_results['environments'] = self.migrate_environments()
