@@ -141,6 +141,7 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
 - Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → secrets → environments → infrastructures → services → other templates → pipelines)
+- **Pagination Support**: All list operations automatically handle pagination to fetch complete results, regardless of dataset size
 - **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
 - **Template Dependency Order**: Templates are migrated in a specific order based on dependencies (referenced templates must be migrated first):
   - **SecretManager templates** are migrated first (right after projects/orgs, before Pipeline templates)

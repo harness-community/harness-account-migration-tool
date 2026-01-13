@@ -149,11 +149,12 @@ Resources are migrated in dependency order:
 3. **SecretManager Templates** (third - must be migrated early, right after projects/orgs)
 4. **Deployment Template and Artifact Source Templates** (fourth - must be migrated before services and environments)
 5. **Connectors** (fifth - may be referenced by other resources)
-6. **Environments** (sixth - may be referenced by infrastructures)
-7. **Infrastructures** (seventh - depend on environments)
-8. **Services** (eighth - may reference connectors and environments)
-9. **Other Templates** (ninth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
-10. **Pipelines** (last - may reference all other resources including templates)
+6. **Secrets** (sixth - may be referenced by other resources, special handling for harnessSecretManager)
+7. **Environments** (seventh - may be referenced by infrastructures)
+8. **Infrastructures** (eighth - depend on environments)
+9. **Services** (ninth - may reference connectors and environments)
+10. **Other Templates** (tenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
+11. **Pipelines** (last - may reference all other resources including templates)
 
 **Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. **Important**: Templates must be migrated before pipelines because pipelines can be built from templates and depend on them.
 
@@ -237,7 +238,8 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
 - **Pagination Helper**: Uses `_fetch_paginated()` method to handle paginated responses
 - **Pagination Parameters**: 
   - Default page size: 100 items per page
-  - Uses `page` and `size` parameters (configurable)
+  - Most APIs use `page` and `size` parameters (configurable)
+  - Some APIs use `pageIndex` and `pageSize` parameters (e.g., secrets v2 API)
   - Some APIs use pagination in query parameters (GET requests, most POST requests)
   - Some APIs use pagination in request body (e.g., pipelines API)
 - **Response Structure**: 
@@ -245,6 +247,7 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
   - Pagination metadata at `data.totalPages`, `data.totalElements`, etc.
   - Automatically detects when all pages have been fetched
 - **Safety Limits**: Maximum 10,000 pages to prevent infinite loops
+- **Custom Pagination**: Some APIs (like secrets v2) require custom pagination logic due to different parameter names (`pageIndex`/`pageSize` instead of `page`/`size`)
 
 ### Error Handling
 - API errors are caught and logged
@@ -291,6 +294,12 @@ Exported files include scope information:
 - **Query Parameters**: Requires `routingId` (account identifier) and `sortOrders` for listing
 - **Storage Method**: Always Inline (not tracked via GitX)
 - **Special Handling**: For secrets stored in `harnessSecretManager`, the value cannot be migrated and is set to "changeme" as a placeholder
+  - **harnessSecretManager Identification**: The `secretManagerIdentifier` field is located in `spec.secretManagerIdentifier` (not at top level)
+  - **harnessSecretManager Variants**: 
+    - `harnessSecretManager` (project level)
+    - `account.harnessSecretManager` (account level)
+    - `org.harnessSecretManager` (org level)
+  - All three variants are detected and handled the same way (value set to "changeme")
 - **Data Extraction**: Extract from `secret` key in list response (may also be in `resource` or directly in `data`)
 - **Export**: Secrets are exported as JSON files (sensitive values are redacted)
 
@@ -402,6 +411,7 @@ for item in list_response:
 - **Templates**: `item.get('template', item)` (note: template list responses may not use nested structure)
 - **Projects**: `item.get('project', item)`
 - **Organizations**: `item.get('organization', item)`
+- **Secrets**: `item.get('secret', item)` (v2 API may return secrets in nested structure)
 
 **Important**: Always use the fallback pattern `item.get('resourceName', item)` to handle cases where the API might return the data directly (for backward compatibility or different API versions).
 
@@ -694,6 +704,15 @@ for item in list_response:
   - Templates may use `gitDetails` or `entityGitDetails` field
   - Other resources may use `gitDetails` field
   - Check both when extracting: `resource_data.get('entityGitDetails', {}) or resource_data.get('gitDetails', {})`
+- **Secrets Special Fields**:
+  - `secretManagerIdentifier` is located in `spec.secretManagerIdentifier` (not at top level)
+  - Check for harnessSecretManager variants: `harnessSecretManager`, `account.harnessSecretManager`, `org.harnessSecretManager`
+  - Value field is in `spec.value` and should be set to "changeme" for harnessSecretManager secrets
+  - Always check `cleaned_data.get('spec', {}).get('secretManagerIdentifier', '')` when identifying secret manager type
+- **Secrets Special Fields**:
+  - `secretManagerIdentifier` is located in `spec.secretManagerIdentifier` (not at top level)
+  - Check for harnessSecretManager variants: `harnessSecretManager`, `account.harnessSecretManager`, `org.harnessSecretManager`
+  - Value field is in `spec.value` and should be set to "changeme" for harnessSecretManager secrets
 
 ### Detecting GitX vs Inline Storage
 
