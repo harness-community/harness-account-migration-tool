@@ -1727,7 +1727,7 @@ class HarnessMigrator:
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
-            resource_types = ['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines', 'templates']
+            resource_types = ['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'templates', 'pipelines']
         
         all_results = {}
         
@@ -1753,7 +1753,7 @@ class HarnessMigrator:
         
         if 'templates' in resource_types:
             all_results['templates'] = self.migrate_templates()
-
+        
         if 'pipelines' in resource_types:
             all_results['pipelines'] = self.migrate_pipelines()
         

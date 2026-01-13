@@ -150,10 +150,10 @@ Resources are migrated in dependency order:
 4. **Environments** (fourth - may be referenced by infrastructures)
 5. **Infrastructures** (fifth - depend on environments)
 6. **Services** (sixth - may reference connectors and environments)
-7. **Templates** (seventh - may be referenced by pipelines and other resources)
-8. **Pipelines** (last - may reference all other resources)
+7. **Templates** (seventh - must be migrated before pipelines, as pipelines can reference templates)
+8. **Pipelines** (last - may reference all other resources including templates)
 
-**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
+**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. **Important**: Templates must be migrated before pipelines because pipelines can be built from templates and depend on them.
 
 ## Dry-Run Mode
 
