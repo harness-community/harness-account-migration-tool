@@ -14,6 +14,8 @@ This Python script migrates resources from one Harness account to another using 
   - Services
   - Pipelines
   - Templates (with version support - migrates all versions)
+  - Input Sets (child entities of pipelines)
+  - Triggers (child entities of pipelines)
 - **Automatic Storage Detection**: Detects whether resources are stored inline or in GitX (Git Experience)
 - **Dual Migration Support**: 
   - Inline resources: Migrated using YAML content via import APIs
@@ -114,6 +116,8 @@ python harness_migration.py \
 - `services` - Services (supports both inline and GitX storage)
 - `pipelines` - Pipelines (supports both inline and GitX storage)
 - `templates` - Templates (supports both inline and GitX storage, migrates all versions of each template)
+- `input-sets` - Input sets (child entities of pipelines, migrated after pipelines)
+- `triggers` - Triggers (child entities of pipelines, migrated after input sets)
 
 ## Output
 
@@ -140,7 +144,7 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → secrets → environments → infrastructures → services → other templates → pipelines)
+- Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → secrets → environments → infrastructures → services → other templates → pipelines → input sets → triggers)
 - **Pagination Support**: All list operations automatically handle pagination to fetch complete results, regardless of dataset size
 - **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
 - **Template Dependency Order**: Templates are migrated in a specific order based on dependencies (referenced templates must be migrated first):

@@ -7,7 +7,7 @@ This is a Python-based tool for migrating Harness account resources from one Har
 ## Key Features
 
 - **Multi-scope Migration**: Migrates resources at account, organization, and project levels
-- **Multiple Resource Types**: Supports organizations, projects, connectors, secrets, environments, infrastructures, services, pipelines, and templates
+- **Multiple Resource Types**: Supports organizations, projects, connectors, secrets, environments, infrastructures, services, pipelines, templates, input sets, and triggers
 - **YAML Import APIs**: Uses Harness "Import from YAML" APIs where available for reliable migration
 - **Direct API Creation**: Uses create APIs for organizations and projects (not YAML-based)
 - **Dry-run Mode**: Test migrations without making changes to destination account
@@ -154,9 +154,11 @@ Resources are migrated in dependency order:
 8. **Infrastructures** (eighth - depend on environments)
 9. **Services** (ninth - may reference connectors and environments)
 10. **Other Templates** (tenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
-11. **Pipelines** (last - may reference all other resources including templates)
+11. **Pipelines** (eleventh - may reference all other resources including templates)
+12. **Input Sets** (twelfth - child entities of pipelines, must be migrated after pipelines)
+13. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
 
-**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. **Important**: Templates must be migrated before pipelines because pipelines can be built from templates and depend on them.
+**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. **Important**: Templates must be migrated before pipelines because pipelines can be built from templates and depend on them. Input sets and triggers are child entities of pipelines and are migrated after their parent pipelines, with input sets migrated before triggers since triggers may reference input sets.
 
 **Template Migration Order**: Templates are migrated in a specific dependency order (referenced templates must be migrated first):
 - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)
@@ -326,6 +328,24 @@ Exported files include scope information:
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
 - `POST /v1/orgs/{org}/projects/{project}/pipelines` - Create pipeline (for inline resources, JSON body with pipeline_yaml, identifier, name, accountId, orgIdentifier, projectIdentifier, tags)
 - `POST /pipeline/api/pipelines/import` - Import pipeline from GitX (query parameters: orgIdentifier, projectIdentifier, repoName, branch, filePath, connectorRef; JSON body: pipelineDescription)
+
+### Input Sets
+- **Storage Method**: Always Inline (not tracked via GitX)
+- **Child Entity**: Input sets are child entities of pipelines and must be migrated after their parent pipeline
+- `GET /pipeline/api/inputSets` - List input sets for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
+- `GET /pipeline/api/inputSets/{identifier}` - Get input set data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
+- `POST /pipeline/api/inputSets` - Create input set (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"inputSet": {...}}`)
+- **Data Extraction**: Extract from `inputSet` key in list response
+- **Migration Pattern**: Iterate through all pipelines, then list and migrate input sets for each pipeline
+
+### Triggers
+- **Storage Method**: Always Inline (not tracked via GitX)
+- **Child Entity**: Triggers are child entities of pipelines and must be migrated after their parent pipeline and input sets (triggers may reference input sets)
+- `GET /pipeline/api/triggers` - List triggers for a pipeline (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
+- `GET /pipeline/api/triggers/{identifier}` - Get trigger data (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier)
+- `POST /pipeline/api/triggers` - Create trigger (query parameters: pipelineIdentifier, orgIdentifier, projectIdentifier; JSON body: `{"trigger": {...}}`)
+- **Data Extraction**: Extract from `trigger` key in list response
+- **Migration Pattern**: Iterate through all pipelines, then list and migrate triggers for each pipeline
 
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)

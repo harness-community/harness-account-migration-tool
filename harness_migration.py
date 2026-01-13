@@ -429,6 +429,140 @@ class HarnessAPIClient:
             print(f"Failed to import pipeline from GitX: {response.status_code} - {response.text}")
             return False
     
+    def list_input_sets(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
+                       project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all input sets for a pipeline"""
+        endpoint = "/pipeline/api/inputSets"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list input sets: {e}")
+            return []
+    
+    def get_input_set_data(self, input_set_identifier: str, pipeline_identifier: str,
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get input set data"""
+        endpoint = f"/pipeline/api/inputSets/{input_set_identifier}"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Extract from nested 'inputSet' key if present, fallback to 'data' itself
+            input_set_data = data.get('data', {}).get('inputSet', data.get('data', {}))
+            return input_set_data
+        else:
+            print(f"Failed to get input set data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_input_set(self, input_set_data: Dict, pipeline_identifier: str,
+                        org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Create input set"""
+        endpoint = "/pipeline/api/inputSets"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with input set data
+        data = {
+            'inputSet': input_set_data
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created input set")
+            return True
+        else:
+            print(f"Failed to create input set: {response.status_code} - {response.text}")
+            return False
+    
+    def list_triggers(self, pipeline_identifier: str, org_identifier: Optional[str] = None,
+                     project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all triggers for a pipeline"""
+        endpoint = "/pipeline/api/triggers"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list triggers: {e}")
+            return []
+    
+    def get_trigger_data(self, trigger_identifier: str, pipeline_identifier: str,
+                        org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get trigger data"""
+        endpoint = f"/pipeline/api/triggers/{trigger_identifier}"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Extract from nested 'trigger' key if present, fallback to 'data' itself
+            trigger_data = data.get('data', {}).get('trigger', data.get('data', {}))
+            return trigger_data
+        else:
+            print(f"Failed to get trigger data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_trigger(self, trigger_data: Dict, pipeline_identifier: str,
+                      org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Create trigger"""
+        endpoint = "/pipeline/api/triggers"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build JSON payload with trigger data
+        data = {
+            'trigger': trigger_data
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created trigger")
+            return True
+        else:
+            print(f"Failed to create trigger: {response.status_code} - {response.text}")
+            return False
+    
     def list_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all services with pagination support"""
         endpoint = "/ng/api/servicesV2"
@@ -1918,6 +2052,148 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_input_sets(self) -> Dict[str, Any]:
+        """Migrate input sets for all pipelines at all scopes"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Input Sets ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing input sets at {scope_label} ---")
+            
+            # Get all pipelines for this scope
+            pipelines = self.source_client.list_pipelines(org_id, project_id)
+            
+            for pipeline in pipelines:
+                # Extract pipeline data from nested structure if present
+                pipeline_item = pipeline.get('pipeline', pipeline)
+                pipeline_identifier = pipeline_item.get('identifier', '')
+                pipeline_name = pipeline_item.get('name', pipeline_identifier)
+                
+                # List input sets for this pipeline
+                input_sets = self.source_client.list_input_sets(pipeline_identifier, org_id, project_id)
+                
+                if not input_sets:
+                    continue  # No input sets for this pipeline
+                
+                print(f"\nProcessing input sets for pipeline: {pipeline_name} ({pipeline_identifier})")
+                
+                for input_set in input_sets:
+                    # Extract input set data from nested structure if present
+                    input_set_item = input_set.get('inputSet', input_set)
+                    identifier = input_set_item.get('identifier', '')
+                    name = input_set_item.get('name', identifier)
+                    print(f"  Processing input set: {name} ({identifier})")
+                    
+                    # Get full input set data
+                    input_set_data = self.source_client.get_input_set_data(
+                        identifier, pipeline_identifier, org_id, project_id
+                    )
+                    
+                    if not input_set_data:
+                        print(f"    Failed to get data for input set {name}")
+                        results['failed'] += 1
+                        continue
+                    
+                    # Export input set data to file for backup
+                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.json"
+                    
+                    # Create a safe copy for export (remove read-only fields)
+                    export_data = clean_for_creation(input_set_data.copy())
+                    export_file.write_text(json.dumps(export_data, indent=2))
+                    print(f"    Exported to {export_file}")
+                    
+                    # Create in destination (skip in dry-run mode)
+                    if self.dry_run:
+                        print(f"    [DRY RUN] Would create input set in destination account")
+                        results['success'] += 1
+                    else:
+                        if self.dest_client.create_input_set(
+                            input_set_data=export_data, pipeline_identifier=pipeline_identifier,
+                            org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
+                    
+                    time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_triggers(self) -> Dict[str, Any]:
+        """Migrate triggers for all pipelines at all scopes"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Triggers ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing triggers at {scope_label} ---")
+            
+            # Get all pipelines for this scope
+            pipelines = self.source_client.list_pipelines(org_id, project_id)
+            
+            for pipeline in pipelines:
+                # Extract pipeline data from nested structure if present
+                pipeline_item = pipeline.get('pipeline', pipeline)
+                pipeline_identifier = pipeline_item.get('identifier', '')
+                pipeline_name = pipeline_item.get('name', pipeline_identifier)
+                
+                # List triggers for this pipeline
+                triggers = self.source_client.list_triggers(pipeline_identifier, org_id, project_id)
+                
+                if not triggers:
+                    continue  # No triggers for this pipeline
+                
+                print(f"\nProcessing triggers for pipeline: {pipeline_name} ({pipeline_identifier})")
+                
+                for trigger in triggers:
+                    # Extract trigger data from nested structure if present
+                    trigger_item = trigger.get('trigger', trigger)
+                    identifier = trigger_item.get('identifier', '')
+                    name = trigger_item.get('name', identifier)
+                    print(f"  Processing trigger: {name} ({identifier})")
+                    
+                    # Get full trigger data
+                    trigger_data = self.source_client.get_trigger_data(
+                        identifier, pipeline_identifier, org_id, project_id
+                    )
+                    
+                    if not trigger_data:
+                        print(f"    Failed to get data for trigger {name}")
+                        results['failed'] += 1
+                        continue
+                    
+                    # Export trigger data to file for backup
+                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    export_file = self.export_dir / f"trigger_{pipeline_identifier}_{identifier}{scope_suffix}.json"
+                    
+                    # Create a safe copy for export (remove read-only fields)
+                    export_data = clean_for_creation(trigger_data.copy())
+                    export_file.write_text(json.dumps(export_data, indent=2))
+                    print(f"    Exported to {export_file}")
+                    
+                    # Create in destination (skip in dry-run mode)
+                    if self.dry_run:
+                        print(f"    [DRY RUN] Would create trigger in destination account")
+                        results['success'] += 1
+                    else:
+                        if self.dest_client.create_trigger(
+                            trigger_data=export_data, pipeline_identifier=pipeline_identifier,
+                            org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
+                    
+                    time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def _migrate_template_version(self, template_identifier: str, template_name: str, version: str,
                                  template_data: Dict, org_id: Optional[str], project_id: Optional[str],
                                  scope_suffix: str) -> Dict[str, int]:
@@ -2145,7 +2421,7 @@ class HarnessMigrator:
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
-            resource_types = ['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'templates', 'pipelines']
+            resource_types = ['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'templates', 'pipelines', 'input-sets', 'triggers']
         
         all_results = {}
         
@@ -2187,6 +2463,14 @@ class HarnessMigrator:
         if 'pipelines' in resource_types:
             all_results['pipelines'] = self.migrate_pipelines()
         
+        # Input sets and triggers are child entities of pipelines, migrate after pipelines
+        # Input sets must be migrated before triggers (triggers may reference input sets)
+        if 'input-sets' in resource_types:
+            all_results['input_sets'] = self.migrate_input_sets()
+        
+        if 'triggers' in resource_types:
+            all_results['triggers'] = self.migrate_triggers()
+        
         return all_results
 
 
@@ -2197,8 +2481,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates', 'input-sets', 'triggers'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates', 'input-sets', 'triggers'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
