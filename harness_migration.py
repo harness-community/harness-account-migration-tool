@@ -547,7 +547,9 @@ class HarnessAPIClient:
         """List all triggers for a pipeline"""
         endpoint = "/pipeline/api/triggers"
         params = {
-            'pipelineIdentifier': pipeline_identifier
+            'routingId': self.account_id,
+            'accountIdentifier': self.account_id,
+            'targetIdentifier': pipeline_identifier  # targetIdentifier is the pipeline identifier
         }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
