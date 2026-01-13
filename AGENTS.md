@@ -147,20 +147,23 @@ Resources are migrated in dependency order:
 1. **Organizations** (first - required for other resources)
 2. **Projects** (second - required for project-scoped resources)
 3. **SecretManager Templates** (third - must be migrated early, right after projects/orgs)
-4. **Connectors** (fourth - may be referenced by other resources)
-5. **Environments** (fifth - may be referenced by infrastructures)
-6. **Infrastructures** (sixth - depend on environments)
-7. **Services** (seventh - may reference connectors and environments)
-8. **Other Templates** (eighth - Pipeline, Stage, Step, MonitoredService, and other types - must be migrated before pipelines)
-9. **Pipelines** (last - may reference all other resources including templates)
+4. **Deployment Template and Artifact Source Templates** (fourth - must be migrated before services and environments)
+5. **Connectors** (fifth - may be referenced by other resources)
+6. **Environments** (sixth - may be referenced by infrastructures)
+7. **Infrastructures** (seventh - depend on environments)
+8. **Services** (eighth - may reference connectors and environments)
+9. **Other Templates** (ninth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
+10. **Pipelines** (last - may reference all other resources including templates)
 
 **Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. **Important**: Templates must be migrated before pipelines because pipelines can be built from templates and depend on them.
 
 **Template Migration Order**: Templates are migrated in a specific dependency order (referenced templates must be migrated first):
 - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)
-- **Step templates** and **MonitoredService templates**: Migrated second (no dependencies, can be referenced by Stage templates)
-- **Stage templates**: Migrated third (can reference Step and MonitoredService templates)
-- **Pipeline templates**: Migrated fourth (can reference Stage and SecretManager templates)
+- **Deployment Template** and **Artifact Source templates**: Migrated second (before services and environments)
+- **Step templates** and **MonitoredService templates**: Migrated third (no dependencies, can be referenced by Stage templates)
+- **Step Group templates**: Migrated fourth (can be referenced by Stage templates)
+- **Stage templates**: Migrated fifth (can reference Step, MonitoredService, and StepGroup templates)
+- **Pipeline templates**: Migrated sixth (can reference Stage and SecretManager templates)
 - **Other template types**: Migrated last (in any order)
 
 ## Dry-Run Mode
@@ -721,12 +724,14 @@ def is_gitx_resource(self, resource_data: Dict) -> bool:
 
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned resources. Each template can have multiple versions (identified by `versionLabel`), and all versions must be migrated.
-- **Template Type Detection**: Templates have a `templateEntityType` field that indicates the type (e.g., "Pipeline", "Stage", "Step", "SecretManager", "MonitoredService")
-- **Dependency Order**: Templates must be migrated in a specific order based on dependencies:
-  - **SecretManager templates**: Migrated first (right after projects/orgs)
-  - **Pipeline templates**: Migrated second (can reference SecretManager templates)
-  - **Stage templates**: Migrated third (can reference Pipeline templates)
-  - **Step templates** and **MonitoredService templates**: Can be migrated in any order (can reference Stage templates)
+- **Template Type Detection**: Templates have a `templateEntityType` field that indicates the type (e.g., "Pipeline", "Stage", "Step", "StepGroup", "SecretManager", "MonitoredService", "DeploymentTemplate", "ArtifactSource")
+- **Dependency Order**: Templates must be migrated in a specific order based on dependencies (referenced templates must be migrated first):
+  - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)
+  - **Deployment Template** and **Artifact Source templates**: Migrated second (before services and environments)
+  - **Step templates** and **MonitoredService templates**: Migrated third (no dependencies, can be referenced by Stage templates)
+  - **Step Group templates**: Migrated fourth (can be referenced by Stage templates)
+  - **Stage templates**: Migrated fifth (can reference Step, MonitoredService, and StepGroup templates)
+  - **Pipeline templates**: Migrated sixth (can reference Stage and SecretManager templates)
   - **Other template types**: Migrated last (in any order)
 - **List Templates**: Uses `POST /template/api/templates/list-metadata` with `templateListType=LastUpdated` to get all templates
 - **Get Versions**: Uses same `list-metadata` endpoint with `templateListType=All` and `templateIdentifiers` filter in JSON body to get all versions of a specific template
@@ -744,11 +749,12 @@ def is_gitx_resource(self, resource_data: Dict) -> bool:
 - **Migration Pattern**: 
   1. Group templates by `templateEntityType` field
   2. Migrate SecretManager templates first (via `migrate_secret_manager_templates()`)
-  3. Migrate other templates in dependency order (Step/MonitoredService → Stage → Pipeline → Others)
-  4. For each template, get all versions using `get_template_versions()`
-  5. For each version, get template data and detect storage type
-  6. Migrate each version separately (inline or GitX based on storage type)
-  7. Export files include version in filename: `template_{identifier}_v{version}_...`
+  3. Migrate Deployment Template and Artifact Source templates (via `migrate_deployment_and_artifact_source_templates()`)
+  4. Migrate other templates in dependency order (Step/MonitoredService → StepGroup → Stage → Pipeline → Others)
+  5. For each template, get all versions using `get_template_versions()`
+  6. For each version, get template data and detect storage type
+  7. Migrate each version separately (inline or GitX based on storage type)
+  8. Export files include version in filename: `template_{identifier}_v{version}_...`
 
 ## Testing and Validation
 

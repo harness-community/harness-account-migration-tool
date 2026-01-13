@@ -1687,7 +1687,7 @@ class HarnessMigrator:
         
         Args:
             template_types: List of template types to migrate. If None, migrates all types in dependency order.
-                            Order: SecretManager, Step/MonitoredService, Stage, Pipeline, then others.
+                            Order: SecretManager, DeploymentTemplate/ArtifactSource (early), Step/MonitoredService, StepGroup, Stage, Pipeline, then others.
                             Referenced templates must be migrated first.
         """
         action = "Listing" if self.dry_run else "Migrating"
@@ -1696,10 +1696,11 @@ class HarnessMigrator:
         
         # Template type migration order based on dependencies
         # SecretManager templates are handled separately (migrated early)
-        # Dependencies: Pipeline references Stage, Stage references Step/MonitoredService
-        # So we must migrate in reverse dependency order: Step/MonitoredService -> Stage -> Pipeline
-        # This method handles: Step/MonitoredService -> Stage -> Pipeline -> Others
-        template_type_order = ['Step', 'MonitoredService', 'Stage', 'Pipeline']
+        # Deployment Template and Artifact Source templates are handled separately (migrated before services/environments)
+        # Dependencies: Pipeline references Stage, Stage references Step/MonitoredService/StepGroup
+        # So we must migrate in reverse dependency order: Step/MonitoredService -> StepGroup -> Stage -> Pipeline
+        # This method handles: Step/MonitoredService -> StepGroup -> Stage -> Pipeline -> Others
+        template_type_order = ['Step', 'MonitoredService', 'StepGroup', 'Stage', 'Pipeline']
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -1813,6 +1814,12 @@ class HarnessMigrator:
         print(f"\n=== {action} SecretManager Templates ===")
         return self.migrate_templates(template_types=['SecretManager'])
     
+    def migrate_deployment_and_artifact_source_templates(self) -> Dict[str, Any]:
+        """Migrate Deployment Template and Artifact Source templates - must be migrated before services and environments"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Deployment Template and Artifact Source Templates ===")
+        return self.migrate_templates(template_types=['DeploymentTemplate', 'ArtifactSource'])
+    
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
@@ -1830,6 +1837,10 @@ class HarnessMigrator:
         # SecretManager templates must be migrated early (right after projects/orgs)
         if 'templates' in resource_types:
             all_results['secret_manager_templates'] = self.migrate_secret_manager_templates()
+        
+        # Deployment Template and Artifact Source templates must be migrated before services and environments
+        if 'templates' in resource_types:
+            all_results['deployment_artifact_templates'] = self.migrate_deployment_and_artifact_source_templates()
         
         # Then migrate other resources
         if 'connectors' in resource_types:

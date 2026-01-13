@@ -138,12 +138,14 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (organizations → projects → secret manager templates → connectors → environments → infrastructures → services → other templates → pipelines)
+- Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → environments → infrastructures → services → other templates → pipelines)
 - **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
 - **Template Dependency Order**: Templates are migrated in a specific order based on dependencies (referenced templates must be migrated first):
   - **SecretManager templates** are migrated first (right after projects/orgs, before Pipeline templates)
+  - **Deployment Template** and **Artifact Source templates** are migrated second (before services and environments)
   - **Step templates** and **MonitoredService templates** are migrated next (no dependencies)
-  - **Stage templates** are migrated after Step/MonitoredService templates (can reference Step and MonitoredService)
+  - **Step Group templates** are migrated after Step/MonitoredService templates (can be referenced by Stage templates)
+  - **Stage templates** are migrated after Step Group templates (can reference Step, MonitoredService, and StepGroup)
   - **Pipeline templates** are migrated after Stage templates (can reference Stage and SecretManager templates)
   - **Other template types** are migrated last (in any order)
 - **Dependency Order**: Templates must be migrated before pipelines, as pipelines can reference templates
