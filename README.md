@@ -8,6 +8,7 @@ This Python script migrates resources from one Harness account to another using 
   - Organizations
   - Projects
   - Connectors
+  - Secrets (with special handling for harnessSecretManager)
   - Environments
   - Infrastructures
   - Services
@@ -107,6 +108,7 @@ python harness_migration.py \
 - `organizations` - Organizations (account-level)
 - `projects` - Projects (organization-scoped)
 - `connectors` - Connectors (e.g., Git, Docker, Kubernetes)
+- `secrets` - Secrets (not tracked via GitX, uses dummy value "changeme" for harnessSecretManager)
 - `environments` - Environments (supports both inline and GitX storage)
 - `infrastructures` - Infrastructure definitions (supports both inline and GitX storage)
 - `services` - Services (supports both inline and GitX storage)
@@ -138,7 +140,7 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → environments → infrastructures → services → other templates → pipelines)
+- Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → secrets → environments → infrastructures → services → other templates → pipelines)
 - **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
 - **Template Dependency Order**: Templates are migrated in a specific order based on dependencies (referenced templates must be migrated first):
   - **SecretManager templates** are migrated first (right after projects/orgs, before Pipeline templates)
@@ -152,6 +154,7 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 - **Storage Type Detection**: The script automatically detects whether resources are stored inline or in GitX and uses the appropriate migration method
 - **Inline Resources**: Resources stored inline are migrated by copying their YAML content and importing it
 - **GitX Resources**: Resources stored in GitX are migrated by using their git location details to import from the git repository
+- **Secrets**: Secrets are not tracked via GitX. For secrets stored in `harnessSecretManager`, the value cannot be migrated and will be set to "changeme" as a placeholder - you must update these values manually after migration
 - If a resource already exists in the destination account, the import may fail. You may need to delete existing resources first or modify the YAML identifiers
 - Some resources may have dependencies on others. Ensure all dependencies are migrated before migrating dependent resources
 - The script uses the Harness NextGen (NG) API endpoints. For FirstGen resources, you may need to modify the endpoints

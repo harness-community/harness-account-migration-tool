@@ -904,6 +904,169 @@ class HarnessAPIClient:
             print(f"Failed to list templates: {e}")
             return []
     
+    def list_secrets(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all secrets with pagination support using v2 API
+        
+        Based on Harness API docs: https://apidocs.harness.io/secrets
+        Uses POST /ng/api/v2/secrets/list/secrets with pageIndex/pageSize pagination
+        """
+        endpoint = "/ng/api/v2/secrets/list/secrets"
+        params = {
+            'routingId': self.account_id,
+            'sortOrders': 'lastModifiedAt,DESC'
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        all_items = []
+        page_index = 0
+        page_size = 100
+        
+        while True:
+            params['pageIndex'] = page_index
+            params['pageSize'] = page_size
+            
+            response = self._make_request('POST', endpoint, params=params, data={
+                'filterType': 'Secret'
+            })
+            
+            if response.status_code != 200:
+                print(f"Failed to fetch secrets page {page_index}: {response.status_code} - {response.text}")
+                break
+            
+            response_data = response.json()
+            
+            # Extract content from response - v2 API structure may vary
+            content = response_data.get('data', {}).get('content', [])
+            if not content and 'content' in response_data:
+                content = response_data.get('content', [])
+            if not isinstance(content, list):
+                content = []
+            
+            all_items.extend(content)
+            
+            # Check pagination metadata
+            total_pages = None
+            try:
+                data_obj = response_data.get('data', {})
+                if 'totalPages' in data_obj:
+                    total_pages = int(data_obj['totalPages'])
+                elif 'totalPages' in response_data:
+                    total_pages = int(response_data['totalPages'])
+            except Exception:
+                pass
+            
+            # If we got fewer items than page_size, we're done
+            if len(content) < page_size:
+                break
+            
+            # If we have total_pages info, check if we've reached the last page
+            if total_pages is not None and page_index >= total_pages - 1:
+                break
+            
+            # Continue to next page
+            page_index += 1
+            
+            # Safety limit
+            if page_index > 10000:
+                print(f"Warning: Reached pagination limit at page {page_index}")
+                break
+        
+        return all_items
+    
+    def get_secret_data(self, secret_identifier: str, org_identifier: Optional[str] = None,
+                       project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get secret data by ID and scope using v2 API
+        
+        Based on Harness API docs: https://apidocs.harness.io/secrets
+        Uses GET endpoint: Get the Secret by ID and Scope
+        """
+        endpoint = f"/ng/api/v2/secrets/{secret_identifier}"
+        params = {
+            'routingId': self.account_id
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Extract from nested 'secret' key if present, fallback to 'data' itself
+            secret_data = data.get('data', {}).get('secret', data.get('data', {}))
+            # v2 API might return secret directly in 'data' or 'resource'
+            if not secret_data and 'resource' in data.get('data', {}):
+                secret_data = data.get('data', {}).get('resource', {})
+            if not secret_data and 'secret' in data:
+                secret_data = data.get('secret', {})
+            return secret_data
+        else:
+            print(f"Failed to get secret data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_secret(self, secret_data: Dict, org_identifier: Optional[str] = None,
+                     project_identifier: Optional[str] = None, dry_run: bool = False) -> bool:
+        """Create secret from secret data using v2 API
+        
+        Based on Harness API docs: https://apidocs.harness.io/secrets
+        Uses POST endpoint: Creates a Secret at given Scope
+        
+        For secrets stored in harnessSecretManager, the value cannot be migrated,
+        so a dummy value of "changeme" is used instead.
+        """
+        # Remove read-only fields
+        cleaned_data = clean_for_creation(secret_data)
+        
+        # Check if secret uses harnessSecretManager
+        secret_manager_identifier = cleaned_data.get('secretManagerIdentifier', '')
+        if secret_manager_identifier == 'harnessSecretManager':
+            # For harnessSecretManager, we cannot migrate the value
+            # Set a dummy value that the user must change
+            if 'spec' in cleaned_data:
+                if 'value' in cleaned_data['spec']:
+                    cleaned_data['spec']['value'] = 'changeme'
+                elif 'valueType' in cleaned_data['spec']:
+                    # Some secret types might have different structures
+                    cleaned_data['spec']['value'] = 'changeme'
+        
+        # Prepare the request body - v1 API expects secret object
+        request_body = {
+            'secret': cleaned_data
+        }
+        
+        if dry_run:
+            secret_name = cleaned_data.get('name', cleaned_data.get('identifier', 'Unknown'))
+            secret_id = cleaned_data.get('identifier', 'Unknown')
+            secret_type = cleaned_data.get('type', 'Unknown')
+            print(f"  [DRY RUN] Would create secret: {secret_name} ({secret_id}) type: {secret_type}")
+            if secret_manager_identifier == 'harnessSecretManager':
+                print(f"  [DRY RUN] Note: Secret uses harnessSecretManager, value will be set to 'changeme'")
+            return True
+        
+        endpoint = "/ng/api/v2/secrets"
+        params = {
+            'routingId': self.account_id
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created secret")
+            if secret_manager_identifier == 'harnessSecretManager':
+                print(f"  Warning: Secret uses harnessSecretManager, value set to 'changeme' - please update manually")
+            return True
+        else:
+            print(f"Failed to create secret: {response.status_code} - {response.text}")
+            return False
+    
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
                               project_identifier: Optional[str] = None) -> List[str]:
         """Get all versions of a template"""
@@ -1230,6 +1393,73 @@ class HarnessMigrator:
                 else:
                     if self.dest_client.create_connector_yaml(
                         yaml_content, org_id, project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_secrets(self) -> Dict[str, Any]:
+        """Migrate secrets at all scopes (account, org, project)"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Secrets ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing secrets at {scope_label} ---")
+            
+            secrets = self.source_client.list_secrets(org_id, project_id)
+            
+            for secret in secrets:
+                # Extract secret data from nested structure if present
+                secret_item = secret.get('secret', secret) if isinstance(secret, dict) else secret
+                identifier = secret_item.get('identifier', '') if isinstance(secret_item, dict) else ''
+                name = secret_item.get('name', identifier) if isinstance(secret_item, dict) else identifier
+                print(f"\nProcessing secret: {name} ({identifier}) at {scope_label}")
+                
+                # Get full secret data
+                secret_data = self.source_client.get_secret_data(identifier, org_id, project_id)
+                
+                if not secret_data:
+                    print(f"  Failed to get data for secret {name}")
+                    results['failed'] += 1
+                    continue
+                
+                # Export secret data to file for backup (without sensitive values)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                export_file = self.export_dir / f"secret_{identifier}{scope_suffix}.json"
+                
+                # Create a safe copy for export (remove sensitive values)
+                export_data = secret_data.copy()
+                if 'spec' in export_data:
+                    export_spec = export_data['spec'].copy()
+                    if 'value' in export_spec:
+                        export_spec['value'] = '***REDACTED***'
+                    export_data['spec'] = export_spec
+                
+                try:
+                    import json
+                    export_file.write_text(json.dumps(export_data, indent=2))
+                    print(f"  Exported secret metadata to {export_file}")
+                except Exception as e:
+                    print(f"  Warning: Failed to export secret metadata: {e}")
+                
+                # Create in destination (skip in dry-run mode)
+                if self.dry_run:
+                    secret_manager = secret_data.get('secretManagerIdentifier', 'Unknown')
+                    if secret_manager == 'harnessSecretManager':
+                        print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager)")
+                    else:
+                        print(f"  [DRY RUN] Would create secret")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_secret(
+                        secret_data=secret_data, org_identifier=org_id, project_identifier=project_id
                     ):
                         results['success'] += 1
                     else:
@@ -1899,7 +2129,7 @@ class HarnessMigrator:
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
-            resource_types = ['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'templates', 'pipelines']
+            resource_types = ['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'templates', 'pipelines']
         
         all_results = {}
         
@@ -1921,6 +2151,9 @@ class HarnessMigrator:
         # Then migrate other resources
         if 'connectors' in resource_types:
             all_results['connectors'] = self.migrate_connectors()
+        
+        if 'secrets' in resource_types:
+            all_results['secrets'] = self.migrate_secrets()
         
         if 'environments' in resource_types:
             all_results['environments'] = self.migrate_environments()
@@ -1948,8 +2181,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
-                       default=['organizations', 'projects', 'connectors', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

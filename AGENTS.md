@@ -7,7 +7,7 @@ This is a Python-based tool for migrating Harness account resources from one Har
 ## Key Features
 
 - **Multi-scope Migration**: Migrates resources at account, organization, and project levels
-- **Multiple Resource Types**: Supports organizations, projects, connectors, environments, infrastructures, services, pipelines, and templates
+- **Multiple Resource Types**: Supports organizations, projects, connectors, secrets, environments, infrastructures, services, pipelines, and templates
 - **YAML Import APIs**: Uses Harness "Import from YAML" APIs where available for reliable migration
 - **Direct API Creation**: Uses create APIs for organizations and projects (not YAML-based)
 - **Dry-run Mode**: Test migrations without making changes to destination account
@@ -281,6 +281,18 @@ Exported files include scope information:
 - `GET /ng/api/connectors` - List connectors
 - `GET /ng/api/connectors/{identifier}` - Get connector
 - `POST /ng/api/connectors` - Create connector (with YAML content in body, `Content-Type: text/yaml`)
+
+### Secrets
+- **API Version**: Uses v2 API endpoints (https://apidocs.harness.io/secrets)
+- `POST /ng/api/v2/secrets/list/secrets` - List secrets (with filter criteria in request body, supports pagination with pageIndex/pageSize)
+- `GET /ng/api/v2/secrets/{identifier}` - Get secret by ID and scope
+- `POST /ng/api/v2/secrets` - Create secret at given scope (with secret data in JSON body)
+- **Pagination**: Uses `pageIndex` and `pageSize` parameters (not `page` and `size`)
+- **Query Parameters**: Requires `routingId` (account identifier) and `sortOrders` for listing
+- **Storage Method**: Always Inline (not tracked via GitX)
+- **Special Handling**: For secrets stored in `harnessSecretManager`, the value cannot be migrated and is set to "changeme" as a placeholder
+- **Data Extraction**: Extract from `secret` key in list response (may also be in `resource` or directly in `data`)
+- **Export**: Secrets are exported as JSON files (sensitive values are redacted)
 
 ### Environments
 - `GET /ng/api/environmentsV2` - List environments
