@@ -498,11 +498,13 @@ class HarnessAPIClient:
             print(f"Failed to create input set: {response.status_code} - {response.text}")
             return False
     
-    def import_input_set_yaml(self, git_details: Dict, input_set_identifier: str, pipeline_identifier: str,
+    def import_input_set_yaml(self, git_details: Dict, input_set_identifier: str, input_set_name: str,
+                             pipeline_identifier: str, input_set_description: Optional[str] = None,
                              org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Import input set from Git location (for GitX resources only)"""
         endpoint = f"/pipeline/api/inputSets/import/{input_set_identifier}"
         params = {
+            'accountIdentifier': self.account_id,
             'pipelineIdentifier': pipeline_identifier
         }
         if org_identifier:
@@ -522,8 +524,16 @@ class HarnessAPIClient:
         if 'connectorRef' in git_details:
             params['connectorRef'] = git_details['connectorRef']
         
-        # No data body for GitX import
-        response = self._make_request('POST', endpoint, params=params, data=None)
+        # Add isHarnessCodeRepo (default to false if not specified)
+        params['isHarnessCodeRepo'] = git_details.get('isHarnessCodeRepo', 'false')
+        
+        # Build JSON body with input set name and description
+        data = {
+            'inputSetName': input_set_name,
+            'inputSetDescription': input_set_description if input_set_description else ''
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=data)
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported input set from GitX")
@@ -2211,9 +2221,13 @@ class HarnessMigrator:
                     else:
                         if is_gitx:
                             # GitX: Use import endpoint with git details
+                            # Extract input set name and description from input set data
+                            input_set_name = input_set_data.get('name', name)
+                            input_set_description = input_set_data.get('description') or input_set_data.get('inputSetDescription')
                             if self.dest_client.import_input_set_yaml(
                                 git_details=git_details, input_set_identifier=identifier,
-                                pipeline_identifier=pipeline_identifier,
+                                input_set_name=input_set_name, pipeline_identifier=pipeline_identifier,
+                                input_set_description=input_set_description,
                                 org_identifier=org_id, project_identifier=project_id
                             ):
                                 results['success'] += 1
