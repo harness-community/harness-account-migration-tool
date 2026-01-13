@@ -587,24 +587,27 @@ class HarnessAPIClient:
             print(f"Failed to get trigger data: {response.status_code} - {response.text}")
             return None
     
-    def create_trigger(self, trigger_data: Dict, pipeline_identifier: str,
+    def create_trigger(self, trigger_yaml: str, pipeline_identifier: str,
                       org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
-        """Create trigger"""
+        """Create trigger from YAML content (triggers are always inline, not stored in GitX)"""
         endpoint = "/pipeline/api/triggers"
         params = {
-            'pipelineIdentifier': pipeline_identifier
+            'routingId': self.account_id,
+            'targetIdentifier': pipeline_identifier,  # targetIdentifier is the pipeline identifier
+            'ignoreError': 'false',
+            'storeType': 'INLINE'  # Triggers are always inline
         }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        # Build JSON payload with trigger data
-        data = {
-            'trigger': trigger_data
+        # Send raw YAML content with Content-Type: application/yaml
+        headers = {
+            'Content-Type': 'application/yaml'
         }
         
-        response = self._make_request('POST', endpoint, params=params, data=data)
+        response = self._make_request('POST', endpoint, params=params, data=trigger_yaml, headers=headers)
         
         if response.status_code in [200, 201]:
             print(f"Successfully created trigger")
@@ -2310,13 +2313,20 @@ class HarnessMigrator:
                         results['failed'] += 1
                         continue
                     
-                    # Export trigger data to file for backup (triggers are always at project level)
-                    scope_suffix = f"_org_{org_id}_project_{project_id}"
-                    export_file = self.export_dir / f"trigger_{pipeline_identifier}_{identifier}{scope_suffix}.json"
+                    # Extract YAML content from trigger data
+                    trigger_yaml = trigger_data.get('yaml', '')
+                    if not trigger_yaml:
+                        print(f"    Failed to get YAML for trigger {name}")
+                        results['failed'] += 1
+                        continue
                     
-                    # Create a safe copy for export (remove read-only fields)
-                    export_data = clean_for_creation(trigger_data.copy())
-                    export_file.write_text(json.dumps(export_data, indent=2))
+                    # Triggers are always inline (not stored in GitX, even for GitX pipelines)
+                    print(f"    Trigger storage type: Inline")
+                    
+                    # Export trigger YAML to file for backup (triggers are always at project level)
+                    scope_suffix = f"_org_{org_id}_project_{project_id}"
+                    export_file = self.export_dir / f"trigger_{pipeline_identifier}_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(trigger_yaml)
                     print(f"    Exported to {export_file}")
                     
                     # Create in destination (skip in dry-run mode)
@@ -2325,7 +2335,7 @@ class HarnessMigrator:
                         results['success'] += 1
                     else:
                         if self.dest_client.create_trigger(
-                            trigger_data=export_data, pipeline_identifier=pipeline_identifier,
+                            trigger_yaml=trigger_yaml, pipeline_identifier=pipeline_identifier,
                             org_identifier=org_id, project_identifier=project_id
                         ):
                             results['success'] += 1
