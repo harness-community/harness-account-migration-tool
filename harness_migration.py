@@ -448,8 +448,8 @@ class HarnessAPIClient:
             return []
     
     def get_input_set_data(self, input_set_identifier: str, pipeline_identifier: str,
-                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
-        """Get input set data - returns YAML string from inputSetYaml field"""
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get input set data - returns full data dict (for both GitX and Inline detection)"""
         endpoint = f"/pipeline/api/inputSets/{input_set_identifier}"
         params = {
             'pipelineIdentifier': pipeline_identifier
@@ -463,16 +463,23 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            # Extract YAML string from data.inputSetYaml
-            input_set_yaml = data.get('data', {}).get('inputSetYaml', '')
-            return input_set_yaml if input_set_yaml else None
+            # Return full data dict for GitX/Inline detection
+            return data.get('data', {})
         else:
             print(f"Failed to get input set data: {response.status_code} - {response.text}")
             return None
     
+    def get_input_set_yaml(self, input_set_identifier: str, pipeline_identifier: str,
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get input set YAML string"""
+        input_set_data = self.get_input_set_data(input_set_identifier, pipeline_identifier, org_identifier, project_identifier)
+        if input_set_data:
+            return input_set_data.get('inputSetYaml', '')
+        return None
+    
     def create_input_set(self, input_set_data: Dict, pipeline_identifier: str,
                         org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
-        """Create input set"""
+        """Create input set (for inline resources)"""
         endpoint = "/pipeline/api/inputSets"
         params = {
             'pipelineIdentifier': pipeline_identifier
@@ -489,6 +496,40 @@ class HarnessAPIClient:
             return True
         else:
             print(f"Failed to create input set: {response.status_code} - {response.text}")
+            return False
+    
+    def import_input_set_yaml(self, git_details: Dict, input_set_identifier: str, pipeline_identifier: str,
+                             org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Import input set from Git location (for GitX resources only)"""
+        endpoint = f"/pipeline/api/inputSets/import/{input_set_identifier}"
+        params = {
+            'pipelineIdentifier': pipeline_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
+        
+        # Add connector reference if present in git details
+        if 'connectorRef' in git_details:
+            params['connectorRef'] = git_details['connectorRef']
+        
+        # No data body for GitX import
+        response = self._make_request('POST', endpoint, params=params, data=None)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully imported input set from GitX")
+            return True
+        else:
+            print(f"Failed to import input set from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_triggers(self, pipeline_identifier: str, org_identifier: Optional[str] = None,
@@ -2095,7 +2136,14 @@ class HarnessMigrator:
                 if not input_sets:
                     continue  # No input sets for this pipeline
                 
+                # Get pipeline data to check if pipeline is GitX (input sets inherit GitX from pipeline)
+                pipeline_data = self.source_client.get_pipeline_data(pipeline_identifier, org_id, project_id)
+                pipeline_is_gitx = False
+                if pipeline_data:
+                    pipeline_is_gitx = self.source_client.is_gitx_resource(pipeline_data)
+                
                 print(f"\nProcessing input sets for pipeline: {pipeline_name} ({pipeline_identifier})")
+                print(f"  Pipeline storage type: {'GitX' if pipeline_is_gitx else 'Inline'}")
                 
                 for input_set in input_sets:
                     # Extract input set data from nested structure if present
@@ -2104,49 +2152,97 @@ class HarnessMigrator:
                     name = input_set_item.get('name', identifier)
                     print(f"  Processing input set: {name} ({identifier})")
                     
-                    # Get full input set data (YAML string)
-                    input_set_yaml = self.source_client.get_input_set_data(
+                    # Get full input set data
+                    input_set_data = self.source_client.get_input_set_data(
                         identifier, pipeline_identifier, org_id, project_id
                     )
                     
-                    if not input_set_yaml:
+                    if not input_set_data:
                         print(f"    Failed to get data for input set {name}")
                         results['failed'] += 1
                         continue
                     
-                    # Parse YAML string to get input set dict
-                    try:
-                        input_set_dict = yaml.safe_load(input_set_yaml)
-                        if not input_set_dict or not isinstance(input_set_dict, dict):
-                            print(f"    Failed to parse input set YAML for {name}")
-                            results['failed'] += 1
-                            continue
-                    except Exception as e:
-                        print(f"    Failed to parse input set YAML for {name}: {e}")
-                        results['failed'] += 1
-                        continue
+                    # Input sets inherit GitX storage from their pipeline
+                    is_gitx = pipeline_is_gitx
+                    storage_type = "GitX" if is_gitx else "Inline"
+                    print(f"    Input set storage type: {storage_type}")
                     
                     # Export input set YAML to file for backup (input sets are always at project level)
                     scope_suffix = f"_org_{org_id}_project_{project_id}"
-                    export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.yaml"
-                    export_file.write_text(input_set_yaml)
-                    print(f"    Exported to {export_file}")
                     
-                    # Create a safe copy for creation (remove read-only fields)
-                    export_data = clean_for_creation(input_set_dict.copy())
+                    yaml_content = None
+                    git_details = None
                     
-                    # Create in destination (skip in dry-run mode)
+                    if is_gitx:
+                        # GitX: Get git details for import
+                        git_details = input_set_data.get('gitDetails', {}) or input_set_data.get('entityGitDetails', {})
+                        if not git_details:
+                            print(f"    Failed to get git details for GitX input set {name}")
+                            results['failed'] += 1
+                            continue
+                        # Extract connector reference from pipeline data if present
+                        connector_ref = pipeline_data.get('connectorRef') if pipeline_data else None
+                        if connector_ref:
+                            git_details['connectorRef'] = connector_ref
+                        # Also get YAML for export
+                        yaml_content = input_set_data.get('inputSetYaml', '')
+                        export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.yaml"
+                        if yaml_content:
+                            export_file.write_text(yaml_content)
+                            print(f"    Exported to {export_file}")
+                    else:
+                        # Inline: Get YAML content for import
+                        yaml_content = input_set_data.get('inputSetYaml', '')
+                        if not yaml_content:
+                            print(f"    Failed to get YAML for inline input set {name}")
+                            results['failed'] += 1
+                            continue
+                        export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.yaml"
+                        export_file.write_text(yaml_content)
+                        print(f"    Exported to {export_file}")
+                    
+                    # Migrate to destination (skip in dry-run mode)
                     if self.dry_run:
-                        print(f"    [DRY RUN] Would create input set in destination account")
+                        if is_gitx:
+                            print(f"    [DRY RUN] Would import input set (GitX) from git location")
+                        else:
+                            print(f"    [DRY RUN] Would create input set (Inline) with YAML content")
                         results['success'] += 1
                     else:
-                        if self.dest_client.create_input_set(
-                            input_set_data=export_data, pipeline_identifier=pipeline_identifier,
-                            org_identifier=org_id, project_identifier=project_id
-                        ):
-                            results['success'] += 1
+                        if is_gitx:
+                            # GitX: Use import endpoint with git details
+                            if self.dest_client.import_input_set_yaml(
+                                git_details=git_details, input_set_identifier=identifier,
+                                pipeline_identifier=pipeline_identifier,
+                                org_identifier=org_id, project_identifier=project_id
+                            ):
+                                results['success'] += 1
+                            else:
+                                results['failed'] += 1
                         else:
-                            results['failed'] += 1
+                            # Inline: Use create endpoint with YAML content
+                            # Parse YAML string to get input set dict
+                            try:
+                                input_set_dict = yaml.safe_load(yaml_content)
+                                if not input_set_dict or not isinstance(input_set_dict, dict):
+                                    print(f"    Failed to parse input set YAML for {name}")
+                                    results['failed'] += 1
+                                    continue
+                            except Exception as e:
+                                print(f"    Failed to parse input set YAML for {name}: {e}")
+                                results['failed'] += 1
+                                continue
+                            
+                            # Create a safe copy for creation (remove read-only fields)
+                            export_data = clean_for_creation(input_set_dict.copy())
+                            
+                            if self.dest_client.create_input_set(
+                                input_set_data=export_data, pipeline_identifier=pipeline_identifier,
+                                org_identifier=org_id, project_identifier=project_id
+                            ):
+                                results['success'] += 1
+                            else:
+                                results['failed'] += 1
                     
                     time.sleep(0.5)  # Rate limiting
         
