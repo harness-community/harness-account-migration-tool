@@ -448,8 +448,8 @@ class HarnessAPIClient:
             return []
     
     def get_input_set_data(self, input_set_identifier: str, pipeline_identifier: str,
-                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get input set data"""
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get input set data - returns YAML string from inputSetYaml field"""
         endpoint = f"/pipeline/api/inputSets/{input_set_identifier}"
         params = {
             'pipelineIdentifier': pipeline_identifier
@@ -463,9 +463,9 @@ class HarnessAPIClient:
         
         if response.status_code == 200:
             data = response.json()
-            # Extract from nested 'inputSet' key if present, fallback to 'data' itself
-            input_set_data = data.get('data', {}).get('inputSet', data.get('data', {}))
-            return input_set_data
+            # Extract YAML string from data.inputSetYaml
+            input_set_yaml = data.get('data', {}).get('inputSetYaml', '')
+            return input_set_yaml if input_set_yaml else None
         else:
             print(f"Failed to get input set data: {response.status_code} - {response.text}")
             return None
@@ -2087,24 +2087,36 @@ class HarnessMigrator:
                     name = input_set_item.get('name', identifier)
                     print(f"  Processing input set: {name} ({identifier})")
                     
-                    # Get full input set data
-                    input_set_data = self.source_client.get_input_set_data(
+                    # Get full input set data (YAML string)
+                    input_set_yaml = self.source_client.get_input_set_data(
                         identifier, pipeline_identifier, org_id, project_id
                     )
                     
-                    if not input_set_data:
+                    if not input_set_yaml:
                         print(f"    Failed to get data for input set {name}")
                         results['failed'] += 1
                         continue
                     
-                    # Export input set data to file for backup
-                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
-                    export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.json"
+                    # Parse YAML string to get input set dict
+                    try:
+                        input_set_dict = yaml.safe_load(input_set_yaml)
+                        if not input_set_dict or not isinstance(input_set_dict, dict):
+                            print(f"    Failed to parse input set YAML for {name}")
+                            results['failed'] += 1
+                            continue
+                    except Exception as e:
+                        print(f"    Failed to parse input set YAML for {name}: {e}")
+                        results['failed'] += 1
+                        continue
                     
-                    # Create a safe copy for export (remove read-only fields)
-                    export_data = clean_for_creation(input_set_data.copy())
-                    export_file.write_text(json.dumps(export_data, indent=2))
+                    # Export input set YAML to file for backup
+                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    export_file = self.export_dir / f"inputset_{pipeline_identifier}_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(input_set_yaml)
                     print(f"    Exported to {export_file}")
+                    
+                    # Create a safe copy for creation (remove read-only fields)
+                    export_data = clean_for_creation(input_set_dict.copy())
                     
                     # Create in destination (skip in dry-run mode)
                     if self.dry_run:
