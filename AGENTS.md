@@ -232,6 +232,20 @@ harness_exports/       # Directory for exported YAML files (created at runtime)
   - Connector creation uses `Content-Type: text/yaml` with YAML content in request body
   - Template creation uses `Content-Type: application/yaml` with raw YAML content in request body
 
+### Pagination Support
+- **All list methods support pagination**: The script automatically fetches all pages of results
+- **Pagination Helper**: Uses `_fetch_paginated()` method to handle paginated responses
+- **Pagination Parameters**: 
+  - Default page size: 100 items per page
+  - Uses `page` and `size` parameters (configurable)
+  - Some APIs use pagination in query parameters (GET requests, most POST requests)
+  - Some APIs use pagination in request body (e.g., pipelines API)
+- **Response Structure**: 
+  - Content is typically at `data.content` in the response
+  - Pagination metadata at `data.totalPages`, `data.totalElements`, etc.
+  - Automatically detects when all pages have been fetched
+- **Safety Limits**: Maximum 10,000 pages to prevent infinite loops
+
 ### Error Handling
 - API errors are caught and logged
 - Failed resources are counted but don't stop the migration

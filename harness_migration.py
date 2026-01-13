@@ -97,18 +97,118 @@ class HarnessAPIClient:
             print(f"Request error: {e}")
             raise
     
+    def _fetch_paginated(self, method: str, endpoint: str, params: Optional[Dict] = None,
+                        data: Optional[Union[Dict, str]] = None, page_size: int = 100,
+                        page_param_name: str = 'page', size_param_name: str = 'size',
+                        content_path: str = 'data.content', total_pages_path: str = 'data.totalPages',
+                        total_elements_path: str = 'data.totalElements',
+                        pagination_in_body: bool = False) -> List[Dict]:
+        """
+        Fetch all pages of a paginated API endpoint
+        
+        Args:
+            method: HTTP method ('GET' or 'POST')
+            endpoint: API endpoint path
+            params: Query parameters (will be updated with pagination params if pagination_in_body=False)
+            data: Request body data (for POST requests, will be updated with pagination params if pagination_in_body=True)
+            page_size: Number of items per page
+            page_param_name: Name of the page parameter (default: 'page')
+            size_param_name: Name of the size parameter (default: 'size')
+            content_path: JSON path to the content array (default: 'data.content')
+            total_pages_path: JSON path to total pages count (default: 'data.totalPages')
+            total_elements_path: JSON path to total elements count (default: 'data.totalElements')
+            pagination_in_body: If True, pagination params go in request body; if False, in query params (default: False)
+        
+        Returns:
+            List of all items across all pages
+        """
+        all_items = []
+        page = 0
+        
+        if params is None:
+            params = {}
+        
+        while True:
+            # Set pagination parameters in the appropriate location
+            if pagination_in_body and isinstance(data, dict):
+                # For POST requests where pagination goes in body
+                request_data = data.copy()
+                request_data[page_param_name] = page
+                request_data[size_param_name] = page_size
+                request_params = params.copy()
+            else:
+                # For GET requests or POST requests where pagination goes in query params
+                request_params = params.copy()
+                request_params[page_param_name] = page
+                request_params[size_param_name] = page_size
+                request_data = data
+            
+            response = self._make_request(method, endpoint, params=request_params, data=request_data)
+            
+            if response.status_code != 200:
+                print(f"Failed to fetch page {page}: {response.status_code} - {response.text}")
+                break
+            
+            response_data = response.json()
+            
+            # Extract content using the content_path
+            content = response_data
+            for key in content_path.split('.'):
+                if isinstance(content, dict):
+                    content = content.get(key, [])
+                else:
+                    content = []
+                    break
+            
+            if not isinstance(content, list):
+                content = []
+            
+            all_items.extend(content)
+            
+            # Check if there are more pages
+            # Try to get total pages from response
+            total_pages = None
+            try:
+                total_pages_obj = response_data
+                for key in total_pages_path.split('.'):
+                    if isinstance(total_pages_obj, dict):
+                        total_pages_obj = total_pages_obj.get(key)
+                    else:
+                        total_pages_obj = None
+                        break
+                if isinstance(total_pages_obj, (int, float)):
+                    total_pages = int(total_pages_obj)
+            except Exception:
+                pass
+            
+            # If we got fewer items than page_size, we're done
+            if len(content) < page_size:
+                break
+            
+            # If we have total_pages info, check if we've reached the last page
+            if total_pages is not None and page >= total_pages - 1:
+                break
+            
+            # If we got exactly page_size items, there might be more pages
+            # Continue to next page
+            page += 1
+            
+            # Safety limit to prevent infinite loops
+            if page > 10000:  # Reasonable upper limit
+                print(f"Warning: Reached pagination limit at page {page}")
+                break
+        
+        return all_items
+    
     def list_organizations(self) -> List[Dict]:
-        """List all organizations"""
+        """List all organizations with pagination support"""
         endpoint = "/ng/api/organizations"
         params = {}
         
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list organizations: {response.status_code} - {response.text}")
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list organizations: {e}")
             return []
     
     def create_organization(self, org_data: Dict, dry_run: bool = False) -> bool:
@@ -142,19 +242,16 @@ class HarnessAPIClient:
             return False
     
     def list_projects(self, org_identifier: Optional[str] = None) -> List[Dict]:
-        """List all projects"""
+        """List all projects with pagination support"""
         endpoint = "/ng/api/projects"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list projects: {response.status_code} - {response.text}")
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list projects: {e}")
             return []
     
     def get_project_data(self, project_identifier: str, org_identifier: Optional[str] = None) -> Optional[Dict]:
@@ -214,7 +311,7 @@ class HarnessAPIClient:
             return False
     
     def list_pipelines(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all pipelines"""
+        """List all pipelines with pagination support"""
         endpoint = "/pipeline/api/pipelines/list"
         params = {}
         if org_identifier:
@@ -222,17 +319,13 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        response = self._make_request('POST', endpoint, params=params, data={
-            'filterType': 'PipelineSetup',
-            'page': 0,
-            'size': 1000
-        })
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list pipelines: {response.status_code} - {response.text}")
+        try:
+            # Pipelines API uses pagination in request body
+            return self._fetch_paginated('POST', endpoint, params=params, data={
+                'filterType': 'PipelineSetup'
+            }, pagination_in_body=True)
+        except Exception as e:
+            print(f"Failed to list pipelines: {e}")
             return []
     
     def get_pipeline_data(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
@@ -337,7 +430,7 @@ class HarnessAPIClient:
             return False
     
     def list_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all services"""
+        """List all services with pagination support"""
         endpoint = "/ng/api/servicesV2"
         params = {}
         if org_identifier:
@@ -345,13 +438,10 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list services: {response.status_code} - {response.text}")
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list services: {e}")
             return []
     
     def get_service_data(self, service_identifier: str, org_identifier: Optional[str] = None,
@@ -449,7 +539,7 @@ class HarnessAPIClient:
             return False
     
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all environments"""
+        """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
         params = {}
         if org_identifier:
@@ -457,13 +547,10 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list environments: {response.status_code} - {response.text}")
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list environments: {e}")
             return []
     
     def get_environment_data(self, environment_identifier: str, org_identifier: Optional[str] = None,
@@ -591,7 +678,7 @@ class HarnessAPIClient:
             return False
     
     def list_connectors(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all connectors"""
+        """List all connectors with pagination support"""
         endpoint = "/ng/api/connectors"
         params = {}
         if org_identifier:
@@ -599,19 +686,16 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            content = data.get('data', {}).get('content', [])
+        try:
+            all_items = self._fetch_paginated('GET', endpoint, params=params)
             # Extract connector data from the "connector" key in each item
             connectors = []
-            for item in content:
+            for item in all_items:
                 connector = item.get('connector', item)  # Fallback to item itself if no "connector" key
                 connectors.append(connector)
             return connectors
-        else:
-            print(f"Failed to list connectors: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"Failed to list connectors: {e}")
             return []
     
     def get_connector_yaml(self, connector_identifier: str, org_identifier: Optional[str] = None,
@@ -681,7 +765,7 @@ class HarnessAPIClient:
             return False
     
     def list_infrastructures(self, environment_identifier: str, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all infrastructures for a specific environment"""
+        """List all infrastructures for a specific environment with pagination support"""
         endpoint = "/ng/api/infrastructures"
         params = {
             'environmentIdentifier': environment_identifier
@@ -691,13 +775,10 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        response = self._make_request('GET', endpoint, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list infrastructures: {response.status_code} - {response.text}")
+        try:
+            return self._fetch_paginated('GET', endpoint, params=params)
+        except Exception as e:
+            print(f"Failed to list infrastructures: {e}")
             return []
     
     def get_infrastructure_data(self, infrastructure_identifier: str, environment_identifier: str,
@@ -802,7 +883,7 @@ class HarnessAPIClient:
             return False
     
     def list_templates(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
-        """List all templates"""
+        """List all templates with pagination support"""
         endpoint = "/template/api/templates/list-metadata"
         params = {}
         if org_identifier:
@@ -810,22 +891,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         params['templateListType'] = 'LastUpdated'
-        params['page'] = 0
-        params['size'] = 1000
         params['sort'] = 'lastUpdatedAt,DESC'
         params['checkReferenced'] = 'true'
         # routingId is typically the account identifier
         params['routingId'] = self.account_id
         
-        response = self._make_request('POST', endpoint, params=params, data={
-            'filterType': 'Template'
-        })
-        
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', {}).get('content', [])
-        else:
-            print(f"Failed to list templates: {response.status_code} - {response.text}")
+        try:
+            return self._fetch_paginated('POST', endpoint, params=params, data={
+                'filterType': 'Template'
+            })
+        except Exception as e:
+            print(f"Failed to list templates: {e}")
             return []
     
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
