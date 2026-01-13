@@ -1022,18 +1022,27 @@ class HarnessAPIClient:
         cleaned_data = clean_for_creation(secret_data)
         
         # Check if secret uses harnessSecretManager
-        secret_manager_identifier = cleaned_data.get('secretManagerIdentifier', '')
-        if secret_manager_identifier == 'harnessSecretManager':
+        # secretManagerIdentifier is in the spec dictionary, not at top level
+        spec = cleaned_data.get('spec', {})
+        secret_manager_identifier = spec.get('secretManagerIdentifier', '')
+        
+        # harnessSecretManager can exist at different levels:
+        # - account.harnessSecretManager (account level)
+        # - org.harnessSecretManager (org level)
+        # - harnessSecretManager (project level)
+        is_harness_secret_manager = (
+            secret_manager_identifier == 'harnessSecretManager' or
+            secret_manager_identifier == 'account.harnessSecretManager' or
+            secret_manager_identifier == 'org.harnessSecretManager'
+        )
+        
+        if is_harness_secret_manager:
             # For harnessSecretManager, we cannot migrate the value
             # Set a dummy value that the user must change
             if 'spec' in cleaned_data:
-                if 'value' in cleaned_data['spec']:
-                    cleaned_data['spec']['value'] = 'changeme'
-                elif 'valueType' in cleaned_data['spec']:
-                    # Some secret types might have different structures
-                    cleaned_data['spec']['value'] = 'changeme'
+                cleaned_data['spec']['value'] = 'changeme'
         
-        # Prepare the request body - v1 API expects secret object
+        # Prepare the request body - v2 API expects secret object
         request_body = {
             'secret': cleaned_data
         }
@@ -1043,8 +1052,8 @@ class HarnessAPIClient:
             secret_id = cleaned_data.get('identifier', 'Unknown')
             secret_type = cleaned_data.get('type', 'Unknown')
             print(f"  [DRY RUN] Would create secret: {secret_name} ({secret_id}) type: {secret_type}")
-            if secret_manager_identifier == 'harnessSecretManager':
-                print(f"  [DRY RUN] Note: Secret uses harnessSecretManager, value will be set to 'changeme'")
+            if is_harness_secret_manager:
+                print(f"  [DRY RUN] Note: Secret uses harnessSecretManager ({secret_manager_identifier}), value will be set to 'changeme'")
             return True
         
         endpoint = "/ng/api/v2/secrets"
@@ -1060,8 +1069,8 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created secret")
-            if secret_manager_identifier == 'harnessSecretManager':
-                print(f"  Warning: Secret uses harnessSecretManager, value set to 'changeme' - please update manually")
+            if is_harness_secret_manager:
+                print(f"  Warning: Secret uses harnessSecretManager ({secret_manager_identifier}), value set to 'changeme' - please update manually")
             return True
         else:
             print(f"Failed to create secret: {response.status_code} - {response.text}")
@@ -1451,9 +1460,16 @@ class HarnessMigrator:
                 
                 # Create in destination (skip in dry-run mode)
                 if self.dry_run:
-                    secret_manager = secret_data.get('secretManagerIdentifier', 'Unknown')
-                    if secret_manager == 'harnessSecretManager':
-                        print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager)")
+                    # secretManagerIdentifier is in spec, not at top level
+                    spec = secret_data.get('spec', {})
+                    secret_manager = spec.get('secretManagerIdentifier', 'Unknown')
+                    is_harness = (
+                        secret_manager == 'harnessSecretManager' or
+                        secret_manager == 'account.harnessSecretManager' or
+                        secret_manager == 'org.harnessSecretManager'
+                    )
+                    if is_harness:
+                        print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager: {secret_manager})")
                     else:
                         print(f"  [DRY RUN] Would create secret")
                     results['success'] += 1
