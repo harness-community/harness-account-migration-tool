@@ -83,6 +83,9 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 - **Webhooks**: Always Inline (NOT stored in GitX)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
+- **Monitored Services**: Always Inline (NOT stored in GitX)
+- **Health Sources**: Part of monitored services, added via PUT update to monitored service
+- **User Journeys**: Always Inline (NOT stored in GitX)
 
 ### Default Resources
 
@@ -143,19 +146,21 @@ Resources are migrated in dependency order:
 11. **Infrastructures** (eleventh - depend on environments)
 12. **Services** (twelfth - may reference connectors and environments)
 13. **Overrides** (thirteenth - may reference environments, infrastructures, and services)
-14. **Other Templates** (fourteenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
-15. **Pipelines** (fifteenth - may reference all other resources including templates)
-16. **Input Sets** (sixteenth - child entities of pipelines, must be migrated after pipelines)
-17. **Triggers** (seventeenth - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
-18. **Webhooks** (eighteenth - may be used by triggers, migrated after triggers)
-19. **Policies** (nineteenth - can reference other resources, migrated after all other resources)
-20. **Policy Sets** (twentieth - reference policies, must be migrated after policies)
-21. **Roles** (twenty-first - can reference organizations and projects, migrated after organizations and projects)
-22. **Resource Groups** (twenty-second - can reference organizations and projects, migrated after organizations and projects)
-23. **Settings** (twenty-third - can reference organizations and projects, migrated after organizations and projects)
-24. **IP Allowlists** (twenty-fourth - account-level only, migrated after organizations and projects)
-25. **Users** (twenty-fifth - reference roles and resource groups via role bindings, must be migrated after roles and resource groups)
-26. **Service Accounts** (last - reference roles and resource groups via role bindings, must be migrated after roles and resource groups)
+14. **Monitored Services** (fourteenth - from CD, require services and environments, contain health sources)
+15. **User Journeys** (fifteenth - Service Reliability Management)
+17. **Other Templates** (seventeenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
+18. **Pipelines** (eighteenth - may reference all other resources including templates)
+19. **Input Sets** (nineteenth - child entities of pipelines, must be migrated after pipelines)
+20. **Triggers** (twentieth - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
+21. **Webhooks** (twenty-first - may be used by triggers, migrated after triggers)
+22. **Policies** (twenty-second - can reference other resources, migrated after all other resources)
+23. **Policy Sets** (twenty-third - reference policies, must be migrated after policies)
+24. **Roles** (twenty-fourth - can reference organizations and projects, migrated after organizations and projects)
+25. **Resource Groups** (twenty-fifth - can reference organizations and projects, migrated after organizations and projects)
+26. **Settings** (twenty-sixth - can reference organizations and projects, migrated after organizations and projects)
+27. **IP Allowlists** (twenty-seventh - account-level only, migrated after organizations and projects)
+28. **Users** (twenty-eighth - reference roles and resource groups via role bindings, must be migrated after roles and resource groups)
+29. **Service Accounts** (last - reference roles and resource groups via role bindings, must be migrated after roles and resource groups)
 
 **Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, resource groups, settings, IP allowlists, users, and service accounts are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
 

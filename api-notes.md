@@ -344,3 +344,31 @@ Most GitX imports use query parameters only (no request body):
 - **Pipelines**: JSON body with `pipelineDescription`
 - **Templates**: JSON body with `templateDescription`, `templateVersion`, `templateName`
 - **Input Sets**: JSON body with `inputSetName`, `inputSetDescription`
+
+### User Journeys (SRM)
+- **Scope**: Project-level only
+- `GET /cv/api/user-journey` - List user journeys
+  - Query parameters: `routingId` (account identifier), `accountId`, `orgIdentifier`, `projectIdentifier`, `offset`, `pageSize`
+  - Response: Paginated with `data.content` array
+- `POST /cv/api/user-journey/create` - Create user journey
+  - Query parameters: `routingId` (account identifier), `accountId`, `orgIdentifier`, `projectIdentifier`
+  - Request body: JSON with `identifier`, `name`
+  - **Storage Method**: Always Inline (NOT stored in GitX)
+
+### Monitored Services (SRM)
+- **Scope**: Project-level only
+- `GET /cv/api/monitored-service` - List monitored services
+  - Query parameters: `routingId` (account identifier), `offset`, `pageSize`, `accountId`, `orgIdentifier`, `projectIdentifier`, `filter`, `servicesAtRiskFilter`
+  - Response: Paginated with `data.content` array
+- `GET /cv/api/monitored-service/{identifier}` - Get monitored service
+  - Query parameters: `routingId` (account identifier), `accountId`, `orgIdentifier`, `projectIdentifier`
+  - Response: Monitored service data in `data.monitoredService` or `data`
+- `POST /cv/api/monitored-service` - Create monitored service
+  - Query parameters: `routingId` (account identifier), `accountId`
+  - Request body: JSON with `orgIdentifier`, `projectIdentifier`, `serviceRef`, `environmentRef`, `identifier`, `name`, `description`, `tags`, `sources` (with `healthSources`, `changeSources`), `dependencies`, `type`
+- `PUT /cv/api/monitored-service/{identifier}` - Update monitored service (used to add health sources)
+  - Query parameters: `routingId` (account identifier), `accountId`, `orgIdentifier`, `projectIdentifier`
+  - Request body: JSON with full monitored service data including health sources
+  - **Storage Method**: Always Inline (NOT stored in GitX)
+  - **Health Sources**: Part of monitored services, added via PUT update to monitored service
+

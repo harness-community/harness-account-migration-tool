@@ -50,6 +50,46 @@ def extract_account_id_from_api_key(api_key: str) -> str:
         raise ValueError(f"Failed to extract account ID from API key: {e}")
 
 
+def is_resource_already_exists_error(status_code: int, response_text: str) -> bool:
+    """Check if an API error response indicates a resource already exists"""
+    # Check status codes that typically indicate resource already exists
+    if status_code not in [400, 409]:
+        return False
+    
+    response_lower = response_text.lower()
+    
+    # Specific error codes that indicate duplicate/existing resource
+    specific_error_codes = ['DUPLICATE_FIELD', 'DUPLICATE_FILE_IMPORT']
+    
+    # Error messages that definitively indicate resource already exists
+    # These must contain words like "already" or "duplicate" to avoid false positives
+    definitive_error_messages = [
+        'already exists',
+        'already present', 
+        'already been imported',
+        'duplicate',
+        'already been created',
+        'resource already'
+    ]
+    
+    # Check for specific error codes (these are definitive)
+    for error_code in specific_error_codes:
+        if error_code.lower() in response_lower:
+            return True
+    
+    # Check for definitive error messages (these are definitive)
+    for error_msg in definitive_error_messages:
+        if error_msg in response_lower:
+            return True
+    
+    return False
+
+
+def format_resource_already_exists_message(resource_type: str, identifier: str, response_text: str, scope_info: str) -> str:
+    """Format a user-friendly message when a resource already exists"""
+    return f"Resource '{resource_type}' with identifier '{identifier}' already exists at {scope_info}. Skipping migration."
+
+
 class HarnessAPIClient:
     """Client for interacting with Harness API"""
     
@@ -2085,6 +2125,203 @@ class HarnessAPIClient:
             print(f"Failed to create API key: {response.status_code} - {response.text}")
             return False
     
+    # User Journeys (SRM)
+    def list_user_journeys(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all user journeys with pagination support"""
+        endpoint = "/cv/api/user-journey"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id,  # Required by user journey API
+            'offset': 0,
+            'pageSize': 100
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            all_items = []
+            page = 0
+            while True:
+                params['offset'] = page * params['pageSize']
+                response = self._make_request('GET', endpoint, params=params)
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get('data', {}).get('content', [])
+                    if not items:
+                        break
+                    all_items.extend(items)
+                    if len(items) < params['pageSize']:
+                        break
+                    page += 1
+                    if page >= 10000:  # Safety limit
+                        break
+                else:
+                    print(f"Failed to list user journeys: {response.status_code} - {response.text}")
+                    break
+            return all_items
+        except Exception as e:
+            print(f"Failed to list user journeys: {e}")
+            return []
+    
+    def create_user_journey(self, identifier: str, name: str, org_identifier: Optional[str] = None,
+                           project_identifier: Optional[str] = None) -> bool:
+        """Create user journey"""
+        endpoint = "/cv/api/user-journey/create"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id  # Required by user journey API
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        request_body = {
+            'identifier': identifier,
+            'name': name
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            if is_resource_already_exists_error(response.status_code, response.text):
+                # Build scope info string
+                if not org_identifier:
+                    scope_info = "account level"
+                elif not project_identifier:
+                    scope_info = f"org {org_identifier} level"
+                else:
+                    scope_info = f"project {project_identifier} (org {org_identifier}) level"
+                print(f"  {format_resource_already_exists_message('user journey', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create user journey: {response.status_code} - {response.text}")
+            return False
+    
+    # Monitored Services (SRM)
+    def list_monitored_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all monitored services with pagination support"""
+        endpoint = "/cv/api/monitored-service"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id,  # Required by monitored service API
+            'offset': 0,
+            'pageSize': 10,
+            'filter': '',
+            'servicesAtRiskFilter': 'false'
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            all_items = []
+            page = 0
+            while True:
+                params['offset'] = page * params['pageSize']
+                response = self._make_request('GET', endpoint, params=params)
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get('data', {}).get('content', [])
+                    if not items:
+                        break
+                    all_items.extend(items)
+                    if len(items) < params['pageSize']:
+                        break
+                    page += 1
+                    if page >= 10000:  # Safety limit
+                        break
+                else:
+                    print(f"Failed to list monitored services: {response.status_code} - {response.text}")
+                    break
+            return all_items
+        except Exception as e:
+            print(f"Failed to list monitored services: {e}")
+            return []
+    
+    def get_monitored_service_data(self, identifier: str, org_identifier: Optional[str] = None,
+                                  project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get monitored service data"""
+        endpoint = f"/cv/api/monitored-service/{identifier}"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id  # Required by monitored service API
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Extract from nested structure if present
+            monitored_service_data = data.get('data', {}).get('monitoredService', data.get('data', {}))
+            return monitored_service_data
+        else:
+            print(f"Failed to get monitored service data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_monitored_service(self, monitored_service_data: Dict, org_identifier: Optional[str] = None,
+                                project_identifier: Optional[str] = None) -> bool:
+        """Create monitored service"""
+        endpoint = "/cv/api/monitored-service"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id  # Required by monitored service API
+        }
+        
+        # Clean data for creation
+        cleaned_data = remove_none_values(clean_for_creation(monitored_service_data))
+        
+        response = self._make_request('POST', endpoint, params=params, data=cleaned_data)
+        
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            if is_resource_already_exists_error(response.status_code, response.text):
+                identifier = cleaned_data.get('identifier', 'unknown')
+                # Build scope info string
+                if not org_identifier:
+                    scope_info = "account level"
+                elif not project_identifier:
+                    scope_info = f"org {org_identifier} level"
+                else:
+                    scope_info = f"project {project_identifier} (org {org_identifier}) level"
+                print(f"  {format_resource_already_exists_message('monitored service', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create monitored service: {response.status_code} - {response.text}")
+            return False
+    
+    def update_monitored_service(self, identifier: str, monitored_service_data: Dict,
+                                org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Update monitored service (used to add health sources)"""
+        endpoint = f"/cv/api/monitored-service/{identifier}"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id  # Required by monitored service API
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Clean data for update
+        cleaned_data = remove_none_values(clean_for_creation(monitored_service_data))
+        
+        response = self._make_request('PUT', endpoint, params=params, data=cleaned_data)
+        
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            print(f"Failed to update monitored service: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -2952,6 +3189,15 @@ class HarnessMigrator:
         """Check if a project is a default resource that should be skipped"""
         return project_identifier == 'default_project'
     
+    def _get_scope_info(self, org_identifier: Optional[str], project_identifier: Optional[str]) -> str:
+        """Get scope information string for error messages"""
+        if not org_identifier:
+            return "account level"
+        elif not project_identifier:
+            return f"org {org_identifier} level"
+        else:
+            return f"project {project_identifier} (org {org_identifier}) level"
+    
     def _is_default_connector(self, connector_identifier: str, org_id: Optional[str], project_id: Optional[str]) -> bool:
         """Check if a connector is a default resource that should be skipped"""
         # Skip harnessImage connector at account level
@@ -3798,6 +4044,168 @@ class HarnessMigrator:
                             results['success'] += 1
                         else:
                             results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_user_journeys(self) -> Dict[str, Any]:
+        """Migrate user journeys at project level (required before SLOs)"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} User Journeys ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # User journeys are project-level only
+        scopes = self._get_project_scopes()
+        for org_id, project_id in scopes:
+            scope_label = f"project {project_id} (org {org_id})"
+            print(f"\n--- Processing user journeys at {scope_label} ---")
+            
+            user_journeys = self.source_client.list_user_journeys(org_id, project_id)
+            
+            if not user_journeys:
+                print(f"  No user journeys found at {scope_label}")
+                continue
+            
+            print(f"  Found {len(user_journeys)} user journey(s) at {scope_label}")
+            
+            for user_journey in user_journeys:
+                # Extract user journey data (may be nested or direct)
+                uj_data = user_journey.get('userJourney', user_journey) if isinstance(user_journey, dict) and 'userJourney' in user_journey else user_journey
+                identifier = uj_data.get('identifier', '')
+                name = uj_data.get('name', identifier)
+                
+                if not identifier:
+                    print(f"  Skipping user journey without identifier")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing user journey: {name} ({identifier}) at {scope_label}")
+                
+                # User journeys are always inline
+                print(f"  User journey storage type: Inline")
+                
+                # Save exported data (as JSON)
+                scope_suffix = f"_org_{org_id}_project_{project_id}"
+                export_file = self.export_dir / f"user_journey_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(uj_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export user journey data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create user journey (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_user_journey(
+                        identifier=identifier,
+                        name=name,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        print(f"  Successfully created user journey")
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_monitored_services(self) -> Dict[str, Any]:
+        """Migrate monitored services at project level (requires services and environments)"""
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Monitored Services ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # Monitored services are project-level only
+        scopes = self._get_project_scopes()
+        for org_id, project_id in scopes:
+            scope_label = f"project {project_id} (org {org_id})"
+            print(f"\n--- Processing monitored services at {scope_label} ---")
+            
+            monitored_services = self.source_client.list_monitored_services(org_id, project_id)
+            
+            if not monitored_services:
+                print(f"  No monitored services found at {scope_label}")
+                continue
+            
+            print(f"  Found {len(monitored_services)} monitored service(s) at {scope_label}")
+            
+            for monitored_service in monitored_services:
+                # Extract monitored service data (may be nested or direct)
+                ms_data = monitored_service.get('monitoredService', monitored_service) if isinstance(monitored_service, dict) and 'monitoredService' in monitored_service else monitored_service
+                identifier = ms_data.get('identifier', '')
+                name = ms_data.get('name', identifier)
+                
+                if not identifier:
+                    print(f"  Skipping monitored service without identifier")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing monitored service: {name} ({identifier}) at {scope_label}")
+                
+                # Get full monitored service data (includes health sources)
+                full_ms_data = self.source_client.get_monitored_service_data(identifier, org_id, project_id)
+                if not full_ms_data:
+                    print(f"  Failed to get data for monitored service {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Monitored services are always inline
+                print(f"  Monitored service storage type: Inline")
+                
+                # Save exported data (as JSON)
+                scope_suffix = f"_org_{org_id}_project_{project_id}"
+                export_file = self.export_dir / f"monitored_service_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(full_ms_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export monitored service data: {e}")
+                
+                # Check for health sources
+                sources = full_ms_data.get('sources', {})
+                health_sources = sources.get('healthSources', []) if sources else []
+                if health_sources:
+                    print(f"  Found {len(health_sources)} health source(s) in monitored service")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create monitored service (Inline) with JSON data")
+                    if health_sources:
+                        print(f"  [DRY RUN] Would add {len(health_sources)} health source(s) to monitored service")
+                    results['success'] += 1
+                else:
+                    # Step 1: Create monitored service (without health sources initially, or with them if included)
+                    # The create API may accept health sources in the initial request
+                    if self.dest_client.create_monitored_service(
+                        monitored_service_data=full_ms_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        print(f"  Successfully created monitored service")
+                        # Step 2: If health sources exist and weren't included in create, update to add them
+                        # Actually, based on HAR file, health sources are added via PUT update
+                        # But let's try creating with them first, and if that doesn't work, we'll update
+                        # For now, we'll create without health sources, then update with them
+                        if health_sources:
+                            # Re-create the monitored service data with health sources for update
+                            # The update should include all health sources
+                            if self.dest_client.update_monitored_service(
+                                identifier=identifier,
+                                monitored_service_data=full_ms_data,
+                                org_identifier=org_id,
+                                project_identifier=project_id
+                            ):
+                                print(f"  Successfully added {len(health_sources)} health source(s) to monitored service")
+                            else:
+                                print(f"  Warning: Monitored service created but failed to add health sources")
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
@@ -5225,6 +5633,14 @@ class HarnessMigrator:
         if 'overrides' in resource_types:
             all_results['overrides'] = self.migrate_overrides()
         
+        # Monitored services must be migrated after services and environments
+        if 'monitored-services' in resource_types:
+            all_results['monitored_services'] = self.migrate_monitored_services()
+        
+        # User journeys
+        if 'user-journeys' in resource_types:
+            all_results['user_journeys'] = self.migrate_user_journeys()
+        
         # Other templates (Pipeline, Stage, Step, MonitoredService, and others) - migrated before pipelines
         if 'templates' in resource_types:
             all_results['templates'] = self.migrate_templates()
@@ -5286,11 +5702,11 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        help='Resource types to migrate')
     parser.add_argument('--exclude-resource-types', nargs='+',
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        default=[],
                        help='Resource types to exclude from migration (takes precedence over --resource-types)')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',

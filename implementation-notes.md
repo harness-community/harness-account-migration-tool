@@ -394,6 +394,38 @@ The migration script automatically skips default resources that should not be mi
 
 **Implementation**: Helper methods `_is_default_organization()`, `_is_default_project()`, and `_is_default_connector()` check for these default resources. Skipped resources are logged and counted in the results summary.
 
+### User Journeys (SRM)
+- **Scope**: Project-level only
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses cv/api endpoints (not ng/api)
+- **Data Format**: Uses JSON structure (not YAML)
+- List endpoint: `GET /cv/api/user-journey` with `offset` and `pageSize` query parameters (not `page` and `size`)
+- List pagination: Uses `offset` and `pageSize` query parameters
+- List response: Nested under `data.content` array
+- Create endpoint: `POST /cv/api/user-journey/create` with JSON body containing `identifier` and `name`
+- **List Response**: Nested structure - extract from `data.content` array
+- **Export Format**: User journeys are exported as `.json` files (not `.yaml`)
+
+### Monitored Services (SRM)
+- **Scope**: Project-level only
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses cv/api endpoints (not ng/api)
+- **Data Format**: Uses JSON structure (not YAML)
+- List endpoint: `GET /cv/api/monitored-service` with `offset`, `pageSize`, `filter`, `servicesAtRiskFilter` query parameters
+- List pagination: Uses `offset` and `pageSize` query parameters
+- List response: Nested under `data.content` array
+- Get endpoint: `GET /cv/api/monitored-service/{identifier}` with `routingId`, `accountId`, `orgIdentifier`, `projectIdentifier` query parameters
+- Get response: Nested under `data.monitoredService` or directly in `data`
+- Create endpoint: `POST /cv/api/monitored-service` with JSON body containing `orgIdentifier`, `projectIdentifier`, `serviceRef`, `environmentRef`, `identifier`, `name`, `description`, `tags`, `sources` (with `healthSources`, `changeSources`), `dependencies`, `type`
+- Update endpoint: `PUT /cv/api/monitored-service/{identifier}` with JSON body containing full monitored service data including health sources
+- **List Response**: Nested structure - extract from `data.content` array, then from `monitoredService` key if present
+- **Get Response**: Nested under `data.monitoredService` or directly in `data`
+- **Request Body**: Contains `orgIdentifier`, `projectIdentifier`, `serviceRef`, `environmentRef`, `identifier`, `name`, `description`, `tags`, `sources` (with `healthSources`, `changeSources`), `dependencies`, `type`
+- **Required Parameters**: `routingId` (account identifier) is required for all monitored service API calls
+- **Export Format**: Monitored services are exported as `.json` files (not `.yaml`)
+- **Dependencies**: Monitored services require services and environments, so they must be migrated after services and environments
+- **Health Sources**: Health sources are part of monitored services. They are added via PUT update to the monitored service. The monitored service is first created, then updated with health sources.
+
 ## Error Handling
 
 - API errors are caught and logged
