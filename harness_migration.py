@@ -4058,6 +4058,9 @@ class HarnessMigrator:
             
             roles = self.source_client.list_roles(org_id, project_id)
             
+            # Count built-in roles silently
+            builtin_count = 0
+            
             for role in roles:
                 # Role data is already extracted from 'role' key in list_roles
                 # But handle both cases (nested or direct) - list_roles already extracts it
@@ -4068,7 +4071,7 @@ class HarnessMigrator:
                 
                 # Skip built-in roles (IDs starting with "_")
                 if self._is_builtin_role(identifier):
-                    print(f"\nSkipping built-in role: {name} ({identifier})")
+                    builtin_count += 1
                     results['skipped'] += 1
                     continue
                 
@@ -4118,6 +4121,10 @@ class HarnessMigrator:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
+            
+            # Print summary of skipped built-in roles for this scope
+            if builtin_count > 0:
+                print(f"  Skipped {builtin_count} built-in role(s) at {scope_label}")
         
         return results
     
