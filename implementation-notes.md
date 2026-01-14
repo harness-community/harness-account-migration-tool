@@ -251,6 +251,21 @@ Different resources use different field names for YAML content:
 - **Export Format**: IP allowlists are exported as `.json` files (not `.yaml`)
 - **Dependencies**: IP allowlists are account-level only, migrated after organizations and projects are created
 
+### Users
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses ng/api/user endpoints
+- **Data Format**: Uses JSON structure (not YAML)
+- List endpoint: `POST /ng/api/user/aggregate` with `pageIndex` and `pageSize` query parameters (not GET, uses POST with empty body)
+- List pagination: Uses `pageIndex` and `pageSize` query parameters
+- List response: Nested under `data.content` array, each item has `user` key and `roleAssignmentMetadata` array
+- Create endpoint: `POST /ng/api/user/users` with JSON body containing `emails` array, `userGroups` array, `roleBindings` array
+- **List Response**: Nested structure - extract from `data.content` array, then from `user` key in each item, also include `roleAssignmentMetadata`
+- **Request Body**: Contains `emails` (array), `userGroups` (array), `roleBindings` (array of objects with `resourceGroupIdentifier`, `roleIdentifier`, `roleName`, `resourceGroupName`, `managedRole`)
+- **Required Parameter**: `routingId` (account identifier) is required for all user API calls
+- **Export Format**: Users are exported as `.json` files (not `.yaml`), email is sanitized in filename (replaces @ with _at_)
+- **Dependencies**: Users reference roles and resource groups via role bindings, so they must be migrated after roles and resource groups are created
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated

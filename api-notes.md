@@ -198,6 +198,22 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: JSON with nested `ip_allowlist_config` object containing `identifier`, `name`, `description`, `enabled`, `allowed_source_type` (array), `ip_address`, `tags`
   - **Note**: IP allowlists are account-level only. Uses `harness-account` header (like webhooks).
 
+### Users
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses ng/api/user endpoints
+- **Data Format**: Uses JSON structure (not YAML)
+- `POST /ng/api/user/aggregate` - List users
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `pageIndex`, `pageSize`, `sortOrders`
+  - Request body: Empty JSON object `{}`
+  - Response: Nested under `data.content` array, each item has `user` key and `roleAssignmentMetadata` array
+  - **Note**: Uses POST method (not GET), pagination uses `pageIndex` and `pageSize`
+- `POST /ng/api/user/users` - Create/invite user
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with `emails` (array), `userGroups` (array), `roleBindings` (array of role binding objects)
+  - Response: `{"status":"SUCCESS","data":{"addUserResponseMap":{"email":"USER_INVITED_SUCCESSFULLY" or "USER_ADDED_SUCCESSFULLY"}}}`
+  - **Note**: Users reference roles and resource groups via role bindings, so they must be migrated after roles and resource groups are created.
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

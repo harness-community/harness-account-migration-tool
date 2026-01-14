@@ -1679,6 +1679,128 @@ class HarnessAPIClient:
             print(f"Failed to create IP allowlist: {response.status_code} - {response.text}")
             return False
     
+    def list_users(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all users with pagination support
+        
+        Uses POST /ng/api/user/aggregate endpoint
+        Response: Nested under data.content, each item has 'user' key and 'roleAssignmentMetadata' array
+        Pagination uses pageIndex and pageSize (not page and size)
+        """
+        endpoint = "/ng/api/user/aggregate"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use custom pagination logic (similar to roles and resource groups)
+            all_users = []
+            page_index = 0
+            page_size = 100
+            
+            while True:
+                params['pageIndex'] = page_index
+                params['pageSize'] = page_size
+                
+                # POST request with empty body
+                response = self._make_request('POST', endpoint, params=params, data={})
+                
+                if response.status_code != 200:
+                    print(f"Failed to list users: {response.status_code} - {response.text}")
+                    break
+                
+                data = response.json()
+                # Extract from nested structure: data.content
+                content = data.get('data', {}).get('content', [])
+                
+                if not content:
+                    break
+                
+                # Extract user data from each item (each has a 'user' key)
+                for item in content:
+                    user_data = item.get('user', item)
+                    # Also include roleAssignmentMetadata for migration
+                    role_assignments = item.get('roleAssignmentMetadata', [])
+                    # Combine user data with role assignments
+                    user_with_roles = user_data.copy()
+                    user_with_roles['roleAssignmentMetadata'] = role_assignments
+                    all_users.append(user_with_roles)
+                
+                # Check if there are more pages
+                total_pages = data.get('data', {}).get('totalPages', 1)
+                if page_index >= total_pages - 1:
+                    break
+                
+                page_index += 1
+            
+            return all_users
+        except Exception as e:
+            print(f"Failed to list users: {e}")
+            return []
+    
+    def create_user(self, user_data: Dict, org_identifier: Optional[str] = None,
+                   project_identifier: Optional[str] = None) -> bool:
+        """Create/invite user from user data
+        
+        Uses POST /ng/api/user/users endpoint
+        Request body: JSON with emails (array), userGroups (array), roleBindings (array)
+        """
+        endpoint = "/ng/api/user/users"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Extract email from user data
+        email = user_data.get('email', '')
+        if not email:
+            print("User email is required")
+            return False
+        
+        # Build request body
+        # Extract role bindings from roleAssignmentMetadata
+        role_bindings = []
+        role_assignment_metadata = user_data.get('roleAssignmentMetadata', [])
+        for role_assignment in role_assignment_metadata:
+            role_binding = {
+                'resourceGroupIdentifier': role_assignment.get('resourceGroupIdentifier', ''),
+                'roleIdentifier': role_assignment.get('roleIdentifier', ''),
+                'roleName': role_assignment.get('roleName', ''),
+                'resourceGroupName': role_assignment.get('resourceGroupName', ''),
+                'managedRole': role_assignment.get('managedRole', False)
+            }
+            role_bindings.append(role_binding)
+        
+        request_body = {
+            'emails': [email],
+            'userGroups': [],  # User groups are not migrated, so leave empty
+            'roleBindings': role_bindings
+        }
+        
+        # Use POST method
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            # Check response for success
+            response_data = response.json()
+            add_user_response_map = response_data.get('data', {}).get('addUserResponseMap', {})
+            user_status = add_user_response_map.get(email, '')
+            if user_status in ['USER_INVITED_SUCCESSFULLY', 'USER_ADDED_SUCCESSFULLY']:
+                print(f"Successfully created user")
+                return True
+            else:
+                print(f"User creation returned status: {user_status}")
+                return False
+        else:
+            print(f"Failed to create user: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -3968,6 +4090,81 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_users(self) -> Dict[str, Any]:
+        """Migrate users at all scopes (account, org, project)
+        
+        Users use /ng/api/user endpoints.
+        Users are always inline (not stored in GitX).
+        Users should be migrated after roles and resource groups (users reference them via role bindings).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Users ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing users at {scope_label} ---")
+            
+            users = self.source_client.list_users(org_id, project_id)
+            
+            if not users:
+                print(f"  No users found at {scope_label}")
+                continue
+            
+            print(f"  Found {len(users)} users at {scope_label}")
+            
+            for user in users:
+                # User data is already extracted from 'user' key in list_users
+                # But handle both cases (nested or direct)
+                user_data = user.get('user', user) if isinstance(user, dict) and 'user' in user else user
+                email = user_data.get('email', '')
+                name = user_data.get('name', email)
+                
+                if not email:
+                    print(f"  Skipping user without email")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing user: {name} ({email}) at {scope_label}")
+                
+                # Include role assignments in user data for migration
+                if 'roleAssignmentMetadata' not in user_data:
+                    user_data['roleAssignmentMetadata'] = user.get('roleAssignmentMetadata', [])
+                
+                # Users are always inline
+                print(f"  User storage type: Inline")
+                
+                # Save exported data (as JSON, not YAML)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Export user data as JSON (sanitize email for filename)
+                export_file = self.export_dir / f"user_{email.replace('@', '_at_')}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(user_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export user data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create user (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    # Use create endpoint with user data
+                    if self.dest_client.create_user(
+                        user_data=user_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -4622,6 +4819,10 @@ class HarnessMigrator:
         if 'ip-allowlists' in resource_types:
             all_results['ip_allowlists'] = self.migrate_ip_allowlists()
         
+        # Users are migrated after roles and resource groups (users reference them via role bindings)
+        if 'users' in resource_types:
+            all_results['users'] = self.migrate_users()
+        
         return all_results
 
 
@@ -4632,8 +4833,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

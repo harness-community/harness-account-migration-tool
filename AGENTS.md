@@ -78,6 +78,7 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 - **Resource Groups**: Always Inline (NOT stored in GitX)
 - **Settings**: Always Inline (NOT stored in GitX)
 - **IP Allowlists**: Always Inline (NOT stored in GitX)
+- **Users**: Always Inline (NOT stored in GitX)
 - **Webhooks**: Always Inline (NOT stored in GitX)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
@@ -151,9 +152,10 @@ Resources are migrated in dependency order:
 21. **Roles** (twenty-first - can reference organizations and projects, migrated after organizations and projects)
 22. **Resource Groups** (twenty-second - can reference organizations and projects, migrated after organizations and projects)
 23. **Settings** (twenty-third - can reference organizations and projects, migrated after organizations and projects)
-24. **IP Allowlists** (last - account-level only, migrated after organizations and projects)
+24. **IP Allowlists** (twenty-fourth - account-level only, migrated after organizations and projects)
+25. **Users** (last - reference roles and resource groups via role bindings, must be migrated after roles and resource groups)
 
-**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, resource groups, settings, and IP allowlists are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
+**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, resource groups, settings, IP allowlists, and users are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
 
 **Default Resources**: The following default resources are automatically skipped during migration:
 - Organization with identifier "default"
