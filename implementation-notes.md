@@ -2,6 +2,33 @@
 
 This file contains implementation-specific details, quirks, and special handling cases for the Harness Account Migration Tool. For generic implementation guidance, see `AGENTS.md`. For API endpoint details, see `api-notes.md`.
 
+## Rate Limiting
+
+The script includes a 0.5 second delay between API requests to avoid overwhelming the Harness API. This delay is applied after each resource operation (create, import, list, etc.).
+
+## Error Handling for Existing Resources
+
+When a resource already exists in the target account, the script detects this condition and provides a user-friendly error message instead of showing raw API error responses. The detection logic checks for:
+- HTTP status codes 400 or 409
+- Error codes: `DUPLICATE_FIELD`, `INVALID_REQUEST`, `DUPLICATE_FILE_IMPORT`, `BadRequest`
+- Error messages containing: "already exists", "already present", "already been imported", "cannot be used", "must be unique"
+
+The script uses helper functions `is_resource_already_exists_error()` and `format_resource_already_exists_message()` to provide clear feedback to users.
+
+## Built-in Resource Filtering
+
+### Roles
+Built-in roles (identifiers starting with "_") are silently skipped during migration. A summary count is printed at the end of each scope instead of individual messages for each skipped role to reduce output noise.
+
+### Resource Groups
+Built-in resource groups (identifiers starting with "_") are automatically skipped.
+
+### Policies
+Built-in example policies (identifiers matching pattern `builtin-example-policy-[0-9]+`) are automatically skipped.
+
+### Settings
+Only overridden settings (`settingSource != "DEFAULT"`) are migrated. Default settings are skipped.
+
 ## Data Extraction Patterns
 
 ### List Response Structure
