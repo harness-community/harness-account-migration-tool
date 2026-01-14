@@ -66,10 +66,24 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 
 - **Organizations and Projects**: Always Inline (not YAML-based)
 - **Connectors**: Always Inline (not stored in GitX)
+  - **Custom Secret Manager Connectors**: Type "customsecretmanager" only, migrated early
+  - **Secret Manager Connectors**: Other types (Vault, AwsSecretManager, AzureKeyVault, GcpKms, etc.), migrated after harnessSecretManager secrets
 - **Secrets**: Always Inline (not tracked via GitX)
+  - **harnessSecretManager Secrets**: Migrated separately before other secrets, uses dummy value "changeme"
+  - **Other Secrets**: Migrated after harnessSecretManager secrets
 - **Environments, Infrastructures, Services, Pipelines, Templates**: Can be GitX or Inline (varies by resource and account configuration)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
+
+### Default Resources
+
+The following default resources are automatically skipped during migration:
+- Organization with identifier "default"
+- Project with identifier "default_project"
+- Connector "harnessImage" at account level
+- Connector "harnessSecretManager" at all scopes (account, org, and project levels)
+
+Skipped resources are logged and counted in the migration results.
 
 ## Scope Handling
 
@@ -107,18 +121,27 @@ Resources are migrated in dependency order:
 1. **Organizations** (first - required for other resources)
 2. **Projects** (second - required for project-scoped resources)
 3. **SecretManager Templates** (third - must be migrated early, right after projects/orgs)
-4. **Deployment Template and Artifact Source Templates** (fourth - must be migrated before services and environments)
-5. **Connectors** (fifth - may be referenced by other resources)
-6. **Secrets** (sixth - may be referenced by other resources, special handling for harnessSecretManager)
-7. **Environments** (seventh - may be referenced by infrastructures)
-8. **Infrastructures** (eighth - depend on environments)
-9. **Services** (ninth - may reference connectors and environments)
-10. **Other Templates** (tenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
-11. **Pipelines** (eleventh - may reference all other resources including templates)
-12. **Input Sets** (twelfth - child entities of pipelines, must be migrated after pipelines)
-13. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
+4. **Custom Secret Manager Connectors** (fourth - type "customsecretmanager" only, migrated right after secret manager templates)
+5. **Secrets stored in harnessSecretManager** (fifth - must be migrated before connectors, uses dummy value "changeme")
+6. **Secret Manager Connectors** (sixth - Vault, AwsSecretManager, AzureKeyVault, GcpKms, etc., excluding "customsecretmanager", migrated after harnessSecretManager secrets)
+7. **Remaining Secrets** (seventh - excluding harnessSecretManager secrets, migrated before regular connectors)
+8. **Connectors** (eighth - excluding custom secret manager connectors and secret manager connectors)
+9. **Deployment Template and Artifact Source Templates** (ninth - must be migrated before services and environments)
+10. **Environments** (tenth - may be referenced by infrastructures)
+11. **Infrastructures** (eleventh - depend on environments)
+12. **Services** (twelfth - may reference connectors and environments)
+13. **Other Templates** (thirteenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
+14. **Pipelines** (fourteenth - may reference all other resources including templates)
+15. **Input Sets** (fifteenth - child entities of pipelines, must be migrated after pipelines)
+16. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
 
 **Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
+
+**Default Resources**: The following default resources are automatically skipped during migration:
+- Organization with identifier "default"
+- Project with identifier "default_project"
+- Connector "harnessImage" at account level
+- Connector "harnessSecretManager" at all scopes (account, org, and project levels)
 
 **Template Migration Order**: Templates are migrated in a specific dependency order (referenced templates must be migrated first):
 - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)

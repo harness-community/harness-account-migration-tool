@@ -182,6 +182,18 @@ Exported files include scope information:
 - 0.5 second delay between requests to avoid API throttling
 - Applied after each resource operation
 
+## Default Resources
+
+The migration script automatically skips default resources that should not be migrated:
+
+- **Default Organization**: Organization with identifier "default" is skipped
+- **Default Project**: Project with identifier "default_project" is skipped
+- **Default Connectors**:
+  - Connector "harnessImage" at account level (when both `org_id` and `project_id` are None)
+  - Connector "harnessSecretManager" at all scopes (account, org, and project levels)
+
+**Implementation**: Helper methods `_is_default_organization()`, `_is_default_project()`, and `_is_default_connector()` check for these default resources. Skipped resources are logged and counted in the results summary.
+
 ## Error Handling
 
 - API errors are caught and logged

@@ -144,9 +144,11 @@ Failed migrations will be reported in the summary, and the exported YAML files w
 ## Notes
 
 - The script includes rate limiting (0.5 second delay between requests) to avoid overwhelming the API
-- Resources are migrated in dependency order (organizations → projects → secret manager templates → deployment/artifact source templates → connectors → secrets → environments → infrastructures → services → other templates → pipelines → input sets → triggers)
+- Resources are migrated in dependency order: organizations → projects → secret manager templates → custom secret manager connectors → harnessSecretManager secrets → secret manager connectors → remaining secrets → connectors → deployment/artifact source templates → environments → infrastructures → services → other templates → pipelines → input sets → triggers
+- **Default Resources Skipped**: The following default resources are automatically skipped: organization "default", project "default_project", connector "harnessImage" at account level, and connector "harnessSecretManager" at all scopes
 - **Pagination Support**: All list operations automatically handle pagination to fetch complete results, regardless of dataset size
 - **Template Versioning**: Templates are versioned resources. The script automatically discovers and migrates all versions of each template
+- **Secret Manager Connectors**: Custom secret manager connectors (type "customsecretmanager") are migrated early, while other secret manager connectors (Vault, AWS Secrets Manager, etc.) are migrated after harnessSecretManager secrets
 - **Template Dependency Order**: Templates are migrated in a specific order based on dependencies (referenced templates must be migrated first):
   - **SecretManager templates** are migrated first (right after projects/orgs, before Pipeline templates)
   - **Deployment Template** and **Artifact Source templates** are migrated second (before services and environments)

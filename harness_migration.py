@@ -1484,6 +1484,13 @@ class HarnessMigrator:
             org_data = org.get('organization', '')
             identifier = org_data.get('identifier', '')
             name = org_data.get('name', identifier)
+            
+            # Skip default organization
+            if self._is_default_organization(identifier):
+                print(f"\nSkipping default organization: {name} ({identifier})")
+                results['skipped'] += 1
+                continue
+            
             print(f"\nProcessing organization: {name} ({identifier})")
             
             if not org_data:
@@ -1533,6 +1540,13 @@ class HarnessMigrator:
             identifier = project_data.get('identifier', '')
             name = project_data.get('name', identifier)
             org_id = project_data.get('orgIdentifier', '')
+            
+            # Skip default project
+            if self._is_default_project(identifier):
+                print(f"\nSkipping default project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
+                results['skipped'] += 1
+                continue
+            
             print(f"\nProcessing project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
             
             if not project_data:
@@ -1569,6 +1583,24 @@ class HarnessMigrator:
             time.sleep(0.5)  # Rate limiting
         
         return results
+    
+    def _is_default_organization(self, org_identifier: str) -> bool:
+        """Check if an organization is a default resource that should be skipped"""
+        return org_identifier == 'default'
+    
+    def _is_default_project(self, project_identifier: str) -> bool:
+        """Check if a project is a default resource that should be skipped"""
+        return project_identifier == 'default_project'
+    
+    def _is_default_connector(self, connector_identifier: str, org_id: Optional[str], project_id: Optional[str]) -> bool:
+        """Check if a connector is a default resource that should be skipped"""
+        # Skip harnessImage connector at account level
+        if not org_id and not project_id and connector_identifier == 'harnessImage':
+            return True
+        # Skip harnessSecretManager connector at all scopes
+        if connector_identifier == 'harnessSecretManager':
+            return True
+        return False
     
     def _is_custom_secret_manager_connector(self, connector_data: Dict) -> bool:
         """Check if a connector is a custom secret manager connector (only 'customsecretmanager' type)"""
@@ -1608,6 +1640,12 @@ class HarnessMigrator:
                     continue
                 
                 identifier = connector_data.get('identifier', '')
+                
+                # Skip default connectors
+                if self._is_default_connector(identifier, org_id, project_id):
+                    results['skipped'] += 1
+                    continue
+                
                 name = connector_data.get('name', identifier)
                 print(f"\nProcessing custom secret manager connector: {name} ({identifier}) at {scope_label}")
                 
@@ -1663,6 +1701,12 @@ class HarnessMigrator:
                     continue
                 
                 identifier = connector_data.get('identifier', '')
+                
+                # Skip default connectors
+                if self._is_default_connector(identifier, org_id, project_id):
+                    results['skipped'] += 1
+                    continue
+                
                 name = connector_data.get('name', identifier)
                 print(f"\nProcessing secret manager connector: {name} ({identifier}) at {scope_label}")
                 
@@ -1722,6 +1766,12 @@ class HarnessMigrator:
                     continue
                 
                 identifier = connector_data.get('identifier', '')
+                
+                # Skip default connectors
+                if self._is_default_connector(identifier, org_id, project_id):
+                    results['skipped'] += 1
+                    continue
+                
                 name = connector_data.get('name', identifier)
                 print(f"\nProcessing connector: {name} ({identifier}) at {scope_label}")
                 
