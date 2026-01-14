@@ -185,6 +185,19 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: Array of setting updates, each with `identifier`, `value`, `allowOverrides`, `updateType` ("UPDATE")
   - **Note**: Settings can reference organizations and projects, so they should be migrated after organizations and projects are created. Only overridden settings (not DEFAULT) are migrated.
 
+### IP Allowlists
+- **Scope**: Account-level only (no org/project scoping)
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses v1 endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with nested `ip_allowlist_config` object (not YAML)
+- `GET /v1/ip-allowlist` - List IP allowlists
+  - Headers: `x-api-key`, `harness-account` (account identifier, required)
+  - Response: Direct array, each item has `ip_allowlist_config` key containing allowlist data
+- `POST /v1/ip-allowlist` - Create IP allowlist
+  - Headers: `x-api-key`, `harness-account` (account identifier, required)
+  - Request body: JSON with nested `ip_allowlist_config` object containing `identifier`, `name`, `description`, `enabled`, `allowed_source_type` (array), `ip_address`, `tags`
+  - **Note**: IP allowlists are account-level only. Uses `harness-account` header (like webhooks).
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

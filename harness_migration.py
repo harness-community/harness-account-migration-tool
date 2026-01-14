@@ -1626,6 +1626,59 @@ class HarnessAPIClient:
             print(f"Failed to update settings: {response.status_code} - {response.text}")
             return False
     
+    def list_ip_allowlists(self) -> List[Dict]:
+        """List all IP allowlists
+        
+        Uses GET /v1/ip-allowlist endpoint
+        Response: Direct array, each item has 'ip_allowlist_config' key
+        IP allowlists are account-level only (no org/project scoping)
+        """
+        endpoint = "/v1/ip-allowlist"
+        headers = {
+            'harness-account': self.account_id  # harness-account header is required
+        }
+        
+        response = self._make_request('GET', endpoint, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Response is a direct array, each item has 'ip_allowlist_config' key
+            allowlists = []
+            for item in data:
+                allowlist_data = item.get('ip_allowlist_config', item)
+                allowlists.append(allowlist_data)
+            return allowlists
+        else:
+            print(f"Failed to list IP allowlists: {response.status_code} - {response.text}")
+            return []
+    
+    def create_ip_allowlist(self, ip_allowlist_data: Dict) -> bool:
+        """Create IP allowlist from IP allowlist data
+        
+        Uses POST /v1/ip-allowlist endpoint
+        Request body must have nested 'ip_allowlist_config' structure
+        IP allowlists are account-level only (no org/project scoping)
+        """
+        endpoint = "/v1/ip-allowlist"
+        headers = {
+            'harness-account': self.account_id  # harness-account header is required
+        }
+        
+        # Build request body with nested ip_allowlist_config structure
+        request_body = {
+            'ip_allowlist_config': ip_allowlist_data
+        }
+        
+        # Use POST method
+        response = self._make_request('POST', endpoint, headers=headers, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created IP allowlist")
+            return True
+        else:
+            print(f"Failed to create IP allowlist: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -3852,6 +3905,69 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_ip_allowlists(self) -> Dict[str, Any]:
+        """Migrate IP allowlists at account level
+        
+        IP allowlists use /v1/ip-allowlist endpoints.
+        IP allowlists are always inline (not stored in GitX).
+        IP allowlists are account-level only (no org/project scoping).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} IP Allowlists ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        print(f"\n--- Processing IP allowlists at account level ---")
+        
+        ip_allowlists = self.source_client.list_ip_allowlists()
+        
+        if not ip_allowlists:
+            print(f"  No IP allowlists found")
+            return results
+        
+        print(f"  Found {len(ip_allowlists)} IP allowlists")
+        
+        for ip_allowlist in ip_allowlists:
+            # IP allowlist data is already extracted from 'ip_allowlist_config' key in list_ip_allowlists
+            # But handle both cases (nested or direct)
+            allowlist_data = ip_allowlist.get('ip_allowlist_config', ip_allowlist) if isinstance(ip_allowlist, dict) and 'ip_allowlist_config' in ip_allowlist else ip_allowlist
+            identifier = allowlist_data.get('identifier', '')
+            name = allowlist_data.get('name', identifier)
+            
+            print(f"\nProcessing IP allowlist: {name} ({identifier})")
+            
+            if not allowlist_data:
+                print(f"  Failed to get data for IP allowlist {identifier}")
+                results['failed'] += 1
+                continue
+            
+            # IP allowlists are always inline
+            print(f"  IP allowlist storage type: Inline")
+            
+            # Save exported data (as JSON, not YAML)
+            export_file = self.export_dir / f"ip_allowlist_{identifier}_account.json"
+            try:
+                export_file.write_text(json.dumps(allowlist_data, indent=2))
+                print(f"  Exported JSON to {export_file}")
+            except Exception as e:
+                print(f"  Failed to export IP allowlist data: {e}")
+            
+            # Migrate to destination (skip in dry-run mode)
+            if self.dry_run:
+                print(f"  [DRY RUN] Would create IP allowlist (Inline) with JSON data")
+                results['success'] += 1
+            else:
+                # Use create endpoint with IP allowlist data
+                if self.dest_client.create_ip_allowlist(
+                    ip_allowlist_data=allowlist_data
+                ):
+                    results['success'] += 1
+                else:
+                    results['failed'] += 1
+            
+            time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -4502,6 +4618,10 @@ class HarnessMigrator:
         if 'settings' in resource_types:
             all_results['settings'] = self.migrate_settings()
         
+        # IP allowlists are account-level only, migrated after organizations and projects
+        if 'ip-allowlists' in resource_types:
+            all_results['ip_allowlists'] = self.migrate_ip_allowlists()
+        
         return all_results
 
 
@@ -4512,8 +4632,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

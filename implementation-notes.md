@@ -237,6 +237,20 @@ Different resources use different field names for YAML content:
 - **Filtering**: Only settings with `settingSource != "DEFAULT"` are migrated (only overridden settings)
 - **Dependencies**: Settings can reference organizations and projects, so they should be migrated after organizations and projects are created
 
+### IP Allowlists
+- **Scope**: Account-level only (no org/project scoping)
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses v1 endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with nested `ip_allowlist_config` object (not YAML)
+- List endpoint: `GET /v1/ip-allowlist`
+- List response: Direct array, each item has `ip_allowlist_config` key containing allowlist data
+- Create endpoint: `POST /v1/ip-allowlist` with JSON body containing nested `ip_allowlist_config` object
+- **List Response**: Direct array - extract from `ip_allowlist_config` key in each item
+- **Request Body**: Must have nested `ip_allowlist_config` structure (not flat)
+- **Required Header**: `harness-account` (account identifier) is required for all IP allowlist API calls (like webhooks)
+- **Export Format**: IP allowlists are exported as `.json` files (not `.yaml`)
+- **Dependencies**: IP allowlists are account-level only, migrated after organizations and projects are created
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated

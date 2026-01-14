@@ -77,6 +77,7 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 - **Roles**: Always Inline (NOT stored in GitX)
 - **Resource Groups**: Always Inline (NOT stored in GitX)
 - **Settings**: Always Inline (NOT stored in GitX)
+- **IP Allowlists**: Always Inline (NOT stored in GitX)
 - **Webhooks**: Always Inline (NOT stored in GitX)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
@@ -107,7 +108,9 @@ The `_get_all_scopes()` method automatically discovers all scopes:
 
 Each migration method iterates through all scopes to ensure complete migration.
 
-**Important Exception**: Pipelines, input sets, and triggers only exist at the project level in Harness. These resources use `_get_project_scopes()` instead of `_get_all_scopes()` to only process project-level scopes.
+**Important Exceptions**: 
+- **Pipelines, input sets, and triggers**: Only exist at the project level in Harness. These resources use `_get_project_scopes()` instead of `_get_all_scopes()` to only process project-level scopes.
+- **IP Allowlists**: Only exist at the account level in Harness. These resources are migrated at account level only (no org/project scoping).
 
 ## API Key Format
 
@@ -147,9 +150,10 @@ Resources are migrated in dependency order:
 20. **Policy Sets** (twentieth - reference policies, must be migrated after policies)
 21. **Roles** (twenty-first - can reference organizations and projects, migrated after organizations and projects)
 22. **Resource Groups** (twenty-second - can reference organizations and projects, migrated after organizations and projects)
-23. **Settings** (last - can reference organizations and projects, migrated after organizations and projects)
+23. **Settings** (twenty-third - can reference organizations and projects, migrated after organizations and projects)
+24. **IP Allowlists** (last - account-level only, migrated after organizations and projects)
 
-**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, resource groups, and settings are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
+**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, resource groups, settings, and IP allowlists are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
 
 **Default Resources**: The following default resources are automatically skipped during migration:
 - Organization with identifier "default"
