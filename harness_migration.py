@@ -1054,16 +1054,14 @@ class HarnessAPIClient:
             print(f"Failed to create webhook: {response.status_code} - {response.text}")
             return False
     
-    def list_policies(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None, module: str = 'cd') -> List[Dict]:
+    def list_policies(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all policies with pagination support
         
         Uses GET /pm/api/v1/policies with per_page and page query parameters
-        Requires module parameter (e.g., 'cd')
         Response: Direct array (not nested)
         """
         endpoint = "/pm/api/v1/policies"
         params = {
-            'module': module,
             'excludeRegoFromResponse': 'true',  # Exclude rego from list response for performance
             'includePolicySetCount': 'true'
         }
@@ -1091,17 +1089,14 @@ class HarnessAPIClient:
             return []
     
     def get_policy_data(self, policy_identifier: str, org_identifier: Optional[str] = None,
-                       project_identifier: Optional[str] = None, module: str = 'cd') -> Optional[Dict]:
+                       project_identifier: Optional[str] = None) -> Optional[Dict]:
         """Get policy data using GET endpoint
         
         Uses GET /pm/api/v1/policies/{identifier}
-        Requires module parameter (e.g., 'cd')
         Response is a direct object (not nested under data)
         """
         endpoint = f"/pm/api/v1/policies/{policy_identifier}"
-        params = {
-            'module': module
-        }
+        params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -1118,17 +1113,14 @@ class HarnessAPIClient:
             return None
     
     def create_policy(self, policy_data: Dict, org_identifier: Optional[str] = None,
-                     project_identifier: Optional[str] = None, module: str = 'cd') -> bool:
+                     project_identifier: Optional[str] = None) -> bool:
         """Create/upsert policy from policy data (for inline resources)
         
         Uses POST /pm/api/v1/policies endpoint
         Requires: identifier, name, rego (not yaml)
-        Requires module parameter (e.g., 'cd')
         """
         endpoint = "/pm/api/v1/policies"
-        params = {
-            'module': module
-        }
+        params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -2932,22 +2924,17 @@ class HarnessMigrator:
         Policies use /pm/api/v1/policies endpoints.
         Policies stored in GitX are created as inline on the target account (GitX import not supported).
         Policies use 'rego' field instead of 'yaml'.
-        Requires 'module' parameter (defaults to 'cd').
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Policies ===")
         results = {'success': 0, 'failed': 0, 'skipped': 0}
         
-        # Policies are module-specific, we'll use 'cd' as default module
-        # In the future, this could be extended to migrate policies for all modules
-        module = 'cd'
-        
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
             scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
-            print(f"\n--- Processing policies at {scope_label} (module: {module}) ---")
+            print(f"\n--- Processing policies at {scope_label} ---")
             
-            policies = self.source_client.list_policies(org_id, project_id, module=module)
+            policies = self.source_client.list_policies(org_id, project_id)
             
             for policy in policies:
                 # Policy data is directly in the list response (not nested)
@@ -2964,7 +2951,7 @@ class HarnessMigrator:
                 
                 # Get full policy data (with rego content)
                 policy_data = self.source_client.get_policy_data(
-                    identifier, org_id, project_id, module=module
+                    identifier, org_id, project_id
                 )
                 
                 # If GET failed, try using data from list (but it won't have rego)
@@ -3011,8 +2998,7 @@ class HarnessMigrator:
                     if self.dest_client.create_policy(
                         policy_data=policy_data,
                         org_identifier=org_id,
-                        project_identifier=project_id,
-                        module=module
+                        project_identifier=project_id
                     ):
                         results['success'] += 1
                     else:

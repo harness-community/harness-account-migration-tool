@@ -105,17 +105,16 @@ This file contains detailed API endpoint information for the Harness Account Mig
 - **Scope**: Account, Organization, and Project levels
 - **Storage Method**: Can be GitX or Inline in source, but always created as Inline on target (GitX import not supported)
 - **API Version**: Uses pm/api/v1 endpoints (not ng/api)
-- **Module**: Policies are module-specific (e.g., 'cd', 'ci', 'cf'). Default is 'cd'.
 - **Data Format**: Uses `rego` field (not `yaml`) - contains Rego policy code
 - `GET /pm/api/v1/policies` - List policies
-  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `module` (required, e.g., 'cd'), `per_page`, `page`, `sort`, `searchTerm`, `excludeRegoFromResponse`, `includePolicySetCount`
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `per_page`, `page`, `sort`, `searchTerm`, `excludeRegoFromResponse`, `includePolicySetCount`
   - Response: Direct array of policy objects (not nested)
   - **Note**: List response excludes rego content by default (`excludeRegoFromResponse=true`)
 - `GET /pm/api/v1/policies/{identifier}` - Get policy data
-  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `module` (required)
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
   - Response: Direct policy object with `identifier`, `name`, `rego`, etc. (not nested under `data`)
 - `POST /pm/api/v1/policies` - Create policy
-  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `module` (required)
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
   - Request body: JSON with `identifier`, `name`, `rego` (Rego policy code)
   - **Note**: GitX import not supported - policies stored in GitX in source are created as inline on target
 

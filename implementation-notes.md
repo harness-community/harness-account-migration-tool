@@ -160,12 +160,11 @@ Different resources use different field names for YAML content:
 - **Scope**: Account, Organization, and Project levels
 - **Storage Method**: Can be GitX or Inline in source, but always created as Inline on target (GitX import not supported)
 - **API Version**: Uses pm/api/v1 endpoints (not ng/api)
-- **Module**: Policies are module-specific (e.g., 'cd', 'ci', 'cf'). Default is 'cd'. Module must be specified in all API calls.
 - **Data Format**: Uses `rego` field (not `yaml`) - contains Rego policy code
 - Rego field: `rego` in get response (located directly in policy object)
 - List endpoint: `GET /pm/api/v1/policies` with `per_page` and `page` query parameters (not `size` and `page`)
 - List pagination: Uses `per_page` and `page` query parameters
-- Get endpoint: `GET /pm/api/v1/policies/{identifier}` with `module` query parameter (required)
+- Get endpoint: `GET /pm/api/v1/policies/{identifier}`
 - Create endpoint: `POST /pm/api/v1/policies` with JSON body containing `identifier`, `name`, `rego` (not `yaml`)
 - **List Response**: Direct array (not nested) - access fields directly from list items
 - **Get Response**: Direct object (not nested under `data` or `policy` key)
