@@ -154,6 +154,23 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: JSON with `identifier`, `name`, `permissions` (array), `allowedScopeLevels` (array), optional `description`, `tags`
   - **Note**: Harness requires a two-step process: first create with POST (without permissions), then update with PUT (with permissions). Roles can reference organizations and projects, so they should be migrated after organizations and projects are created.
 
+### Resource Groups
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses resourcegroup/api/v2 endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with nested `resourceGroup` object (not YAML)
+- `GET /resourcegroup/api/v2/resourcegroup` - List resource groups
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `pageIndex`, `pageSize`, `sortOrders`
+  - Response: Nested under `data.content` array, each item has `resourceGroup` key containing resource group data
+  - **Note**: Pagination uses `pageIndex` and `pageSize` (not `page` and `size`)
+- `GET /resourcegroup/api/v2/resourcegroup/{identifier}` - Get resource group data
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Response: Nested under `data.resourceGroup`
+- `PUT /resourcegroup/api/v2/resourcegroup/{identifier}` - Create/upsert resource group
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with nested `resourceGroup` object containing `identifier`, `name`, `color`, `tags`, `description`, `allowedScopeLevels`, `includedScopes`, `resourceFilter`, etc.
+  - **Note**: Uses PUT method, identifier in URL path. Request body must have nested `resourceGroup` structure. Resource groups can reference organizations and projects, so they should be migrated after organizations and projects are created.
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

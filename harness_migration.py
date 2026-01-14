@@ -1445,6 +1445,126 @@ class HarnessAPIClient:
             print(f"Failed to update role with permissions: {update_response.status_code} - {update_response.text}")
             return False
     
+    def list_resource_groups(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all resource groups with pagination support
+        
+        Uses GET /resourcegroup/api/v2/resourcegroup endpoint
+        Response: Nested under data.content, each item has 'resourceGroup' key
+        Pagination uses pageIndex and pageSize (not page and size)
+        """
+        endpoint = "/resourcegroup/api/v2/resourcegroup"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use custom pagination logic (similar to roles)
+            all_resource_groups = []
+            page_index = 0
+            page_size = 100
+            
+            while True:
+                params['pageIndex'] = page_index
+                params['pageSize'] = page_size
+                
+                response = self._make_request('GET', endpoint, params=params)
+                
+                if response.status_code != 200:
+                    print(f"Failed to list resource groups: {response.status_code} - {response.text}")
+                    break
+                
+                data = response.json()
+                # Extract from nested structure: data.content
+                content = data.get('data', {}).get('content', [])
+                
+                if not content:
+                    break
+                
+                # Extract resource group data from each item (each has a 'resourceGroup' key)
+                for item in content:
+                    resource_group_data = item.get('resourceGroup', item)
+                    all_resource_groups.append(resource_group_data)
+                
+                # Check if there are more pages
+                total_pages = data.get('data', {}).get('totalPages', 1)
+                if page_index >= total_pages - 1:
+                    break
+                
+                page_index += 1
+            
+            return all_resource_groups
+        except Exception as e:
+            print(f"Failed to list resource groups: {e}")
+            return []
+    
+    def get_resource_group_data(self, resource_group_identifier: str, org_identifier: Optional[str] = None,
+                               project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get resource group data using GET endpoint
+        
+        Uses GET /resourcegroup/api/v2/resourcegroup/{identifier}
+        Response is nested under data.resourceGroup
+        """
+        endpoint = f"/resourcegroup/api/v2/resourcegroup/{resource_group_identifier}"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Response is nested under data.resourceGroup
+            resource_group_data = data.get('data', {}).get('resourceGroup', data.get('data', {}))
+            return resource_group_data
+        else:
+            print(f"Failed to get resource group data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_resource_group(self, resource_group_data: Dict, org_identifier: Optional[str] = None,
+                             project_identifier: Optional[str] = None) -> bool:
+        """Create/upsert resource group from resource group data
+        
+        Uses PUT /resourcegroup/api/v2/resourcegroup/{identifier} endpoint
+        Request body must have nested 'resourceGroup' structure
+        """
+        identifier = resource_group_data.get('identifier')
+        if not identifier:
+            print("Resource group identifier is required")
+            return False
+        
+        endpoint = f"/resourcegroup/api/v2/resourcegroup/{identifier}"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build request body with nested resourceGroup structure
+        # Include all fields from resource_group_data
+        request_body = {
+            'resourceGroup': resource_group_data
+        }
+        
+        # Use PUT method
+        response = self._make_request('PUT', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created resource group")
+            return True
+        else:
+            print(f"Failed to create resource group: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -3481,6 +3601,86 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_resource_groups(self) -> Dict[str, Any]:
+        """Migrate resource groups at all scopes (account, org, project)
+        
+        Resource groups use /resourcegroup/api/v2/resourcegroup endpoints.
+        Resource groups are always inline (not stored in GitX).
+        Resource groups should be migrated after organizations and projects are created.
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Resource Groups ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing resource groups at {scope_label} ---")
+            
+            resource_groups = self.source_client.list_resource_groups(org_id, project_id)
+            
+            for resource_group in resource_groups:
+                # Resource group data is already extracted from 'resourceGroup' key in list_resource_groups
+                # But handle both cases (nested or direct)
+                resource_group_data = resource_group.get('resourceGroup', resource_group) if isinstance(resource_group, dict) and 'resourceGroup' in resource_group else resource_group
+                identifier = resource_group_data.get('identifier', '')
+                name = resource_group_data.get('name', identifier)
+                
+                # Skip built-in resource groups (IDs starting with "_")
+                if self._is_builtin_resource_group(identifier):
+                    print(f"\nSkipping built-in resource group: {name} ({identifier})")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing resource group: {name} ({identifier}) at {scope_label}")
+                
+                # Get full resource group data
+                full_resource_group_data = self.source_client.get_resource_group_data(
+                    identifier, org_id, project_id
+                )
+                
+                # If GET failed, use data from list (already extracted)
+                if not full_resource_group_data:
+                    full_resource_group_data = resource_group_data
+                
+                if not full_resource_group_data:
+                    print(f"  Failed to get data for resource group {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Resource groups are always inline
+                print(f"  Resource group storage type: Inline")
+                
+                # Save exported data (as JSON, not YAML)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Export resource group data as JSON
+                export_file = self.export_dir / f"resource_group_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(full_resource_group_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export resource group data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create resource group (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    # Use create endpoint with resource group data
+                    if self.dest_client.create_resource_group(
+                        resource_group_data=full_resource_group_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -4123,6 +4323,10 @@ class HarnessMigrator:
         if 'roles' in resource_types:
             all_results['roles'] = self.migrate_roles()
         
+        # Resource groups are migrated after organizations and projects (they can reference them)
+        if 'resource-groups' in resource_types:
+            all_results['resource_groups'] = self.migrate_resource_groups()
+        
         return all_results
 
 
@@ -4133,8 +4337,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

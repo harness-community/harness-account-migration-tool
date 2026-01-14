@@ -204,6 +204,24 @@ Different resources use different field names for YAML content:
 - **Export Format**: Roles are exported as `.json` files (not `.yaml`)
 - **Dependencies**: Roles can reference organizations and projects, so they should be migrated after organizations and projects are created
 
+### Resource Groups
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses resourcegroup/api/v2 endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with nested `resourceGroup` object (not YAML)
+- List endpoint: `GET /resourcegroup/api/v2/resourcegroup` with `pageIndex` and `pageSize` query parameters (not `page` and `size`)
+- List pagination: Uses `pageIndex` and `pageSize` query parameters
+- List response: Nested under `data.content` array, each item has `resourceGroup` key containing resource group data
+- Get endpoint: `GET /resourcegroup/api/v2/resourcegroup/{identifier}`
+- Get response: Nested under `data.resourceGroup`
+- Create endpoint: `PUT /resourcegroup/api/v2/resourcegroup/{identifier}` with JSON body containing nested `resourceGroup` object
+- **List Response**: Nested structure - extract from `data.content` array, then from `resourceGroup` key in each item
+- **Get Response**: Nested under `data.resourceGroup`
+- **Request Body**: Must have nested `resourceGroup` structure (not flat)
+- **Required Parameter**: `routingId` (account identifier) is required for all resource group API calls
+- **Export Format**: Resource groups are exported as `.json` files (not `.yaml`)
+- **Dependencies**: Resource groups can reference organizations and projects, so they should be migrated after organizations and projects are created
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated
