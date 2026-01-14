@@ -76,6 +76,7 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 - **Policy Sets**: Always Inline (NOT stored in GitX)
 - **Roles**: Always Inline (NOT stored in GitX)
 - **Resource Groups**: Always Inline (NOT stored in GitX)
+- **Settings**: Always Inline (NOT stored in GitX)
 - **Webhooks**: Always Inline (NOT stored in GitX)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
@@ -145,9 +146,10 @@ Resources are migrated in dependency order:
 19. **Policies** (nineteenth - can reference other resources, migrated after all other resources)
 20. **Policy Sets** (twentieth - reference policies, must be migrated after policies)
 21. **Roles** (twenty-first - can reference organizations and projects, migrated after organizations and projects)
-22. **Resource Groups** (last - can reference organizations and projects, migrated after organizations and projects)
+22. **Resource Groups** (twenty-second - can reference organizations and projects, migrated after organizations and projects)
+23. **Settings** (last - can reference organizations and projects, migrated after organizations and projects)
 
-**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, and resource groups are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
+**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks, policy sets, roles, resource groups, and settings are always inline and do not support GitX storage. Policies can be stored in GitX in source but are always created as inline on target (GitX import API not available).
 
 **Default Resources**: The following default resources are automatically skipped during migration:
 - Organization with identifier "default"
@@ -157,6 +159,7 @@ Resources are migrated in dependency order:
 - Policies with identifiers matching pattern "builtin-example-policy-[0-9]+" (built-in example policies)
 - Resource groups with identifiers starting with "_" (built-in resource groups)
 - Roles with identifiers starting with "_" (built-in roles)
+- Settings with `settingSource` of "DEFAULT" (only overridden settings are migrated)
 
 **Template Migration Order**: Templates are migrated in a specific dependency order (referenced templates must be migrated first):
 - **SecretManager templates**: Migrated first (right after projects/orgs, before Pipeline templates)

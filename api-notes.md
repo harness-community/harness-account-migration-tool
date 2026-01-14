@@ -171,6 +171,20 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: JSON with nested `resourceGroup` object containing `identifier`, `name`, `color`, `tags`, `description`, `allowedScopeLevels`, `includedScopes`, `resourceFilter`, etc.
   - **Note**: Uses PUT method, identifier in URL path. Request body must have nested `resourceGroup` structure. Resource groups can reference organizations and projects, so they should be migrated after organizations and projects are created.
 
+### Settings
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses ng/api endpoints
+- **Data Format**: Uses JSON structure (not YAML)
+- `GET /ng/api/settings` - List settings
+  - Query parameters: `accountIdentifier`, `category` (optional), `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Response: Array of settings, each with `setting` key containing setting data
+  - **Note**: Only settings with `settingSource != "DEFAULT"` should be migrated (i.e., only overridden settings)
+- `PUT /ng/api/settings` - Update settings
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: Array of setting updates, each with `identifier`, `value`, `allowOverrides`, `updateType` ("UPDATE")
+  - **Note**: Settings can reference organizations and projects, so they should be migrated after organizations and projects are created. Only overridden settings (not DEFAULT) are migrated.
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

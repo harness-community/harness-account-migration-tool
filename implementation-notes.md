@@ -222,6 +222,21 @@ Different resources use different field names for YAML content:
 - **Export Format**: Resource groups are exported as `.json` files (not `.yaml`)
 - **Dependencies**: Resource groups can reference organizations and projects, so they should be migrated after organizations and projects are created
 
+### Settings
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses ng/api endpoints
+- **Data Format**: Uses JSON structure (not YAML)
+- List endpoint: `GET /ng/api/settings` with optional `category` query parameter
+- List response: Array of settings, each with `setting` key containing setting data
+- Update endpoint: `PUT /ng/api/settings` with `routingId` parameter (required)
+- Update request body: Array of setting updates with `identifier`, `value`, `allowOverrides`, `updateType`
+- **List Response**: Array structure - extract from `data` array, then from `setting` key in each item
+- **Required Parameter**: `routingId` (account identifier) is required for update API calls
+- **Export Format**: Settings are exported as `.json` files (not `.yaml`), grouped by category
+- **Filtering**: Only settings with `settingSource != "DEFAULT"` are migrated (only overridden settings)
+- **Dependencies**: Settings can reference organizations and projects, so they should be migrated after organizations and projects are created
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated

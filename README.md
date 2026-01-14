@@ -22,6 +22,7 @@ This Python script migrates resources from one Harness account to another using 
   - Policy Sets (collections of policies)
   - Roles (access control roles)
   - Resource Groups (collections of resources for access control)
+  - Settings (account, organization, and project-level settings)
 - **Automatic Storage Detection**: Detects whether resources are stored inline or in GitX (Git Experience)
 - **Dual Migration Support**: 
   - Inline resources: Migrated using YAML content via import APIs

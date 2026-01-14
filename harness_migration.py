@@ -1565,6 +1565,67 @@ class HarnessAPIClient:
             print(f"Failed to create resource group: {response.status_code} - {response.text}")
             return False
     
+    def list_settings(self, category: Optional[str] = None, org_identifier: Optional[str] = None,
+                     project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all settings with optional category filter
+        
+        Uses GET /ng/api/settings endpoint
+        Response: Array of settings, each with 'setting' key containing setting data
+        """
+        endpoint = "/ng/api/settings"
+        params = {}
+        if category:
+            params['category'] = category
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Response is an array of settings, each with 'setting' key
+            settings_list = data.get('data', [])
+            # Extract setting data from each item
+            settings = []
+            for item in settings_list:
+                setting_data = item.get('setting', item)
+                settings.append(setting_data)
+            return settings
+        else:
+            print(f"Failed to list settings: {response.status_code} - {response.text}")
+            return []
+    
+    def update_settings(self, settings_updates: List[Dict], org_identifier: Optional[str] = None,
+                       project_identifier: Optional[str] = None) -> bool:
+        """Update settings
+        
+        Uses PUT /ng/api/settings endpoint
+        Request body: Array of setting updates with allowOverrides, updateType, identifier, value
+        """
+        endpoint = "/ng/api/settings"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build request body as array of setting updates
+        request_body = settings_updates
+        
+        # Use PUT method
+        response = self._make_request('PUT', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully updated settings")
+            return True
+        else:
+            print(f"Failed to update settings: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -3681,6 +3742,116 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_settings(self) -> Dict[str, Any]:
+        """Migrate settings at all scopes (account, org, project)
+        
+        Settings use /ng/api/settings endpoints.
+        Settings are always inline (not stored in GitX).
+        Only settings that have been overridden (settingSource != "DEFAULT") should be migrated.
+        Settings are organized by category and must be fetched per category.
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Settings ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # Available settings categories (from Harness API)
+        # Not all categories may be available depending on which Harness modules are enabled
+        settings_categories = [
+            'CORE',
+            'CONNECTORS',
+            'CD',
+            'CI',
+            'GIT_EXPERIENCE',
+            'PMS',
+            'NOTIFICATIONS',
+            'DBOPS',
+            'EULA',
+            'MODULES_VISIBILITY'
+        ]
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing settings at {scope_label} ---")
+            
+            # Process each category
+            for category in settings_categories:
+                try:
+                    # Get settings for this category
+                    settings = self.source_client.list_settings(category, org_id, project_id)
+                    
+                    # If no settings returned, category might not be available - skip gracefully
+                    if not settings:
+                        continue
+                    
+                    # Filter to only settings that have been overridden (not DEFAULT)
+                    overridden_settings = []
+                    for setting in settings:
+                        setting_source = setting.get('settingSource', '')
+                        # Only migrate settings that are not DEFAULT (i.e., have been overridden)
+                        if setting_source and setting_source != 'DEFAULT':
+                            overridden_settings.append(setting)
+                    
+                    if not overridden_settings:
+                        continue
+                    
+                    print(f"\n  Found {len(overridden_settings)} overridden settings in category: {category}")
+                    
+                    # Build settings updates array
+                    settings_updates = []
+                    for setting in overridden_settings:
+                        identifier = setting.get('identifier', '')
+                        value = setting.get('value')
+                        allow_overrides = setting.get('allowOverrides', True)
+                        
+                        if not identifier:
+                            continue
+                        
+                        settings_updates.append({
+                            'identifier': identifier,
+                            'value': value,
+                            'allowOverrides': allow_overrides,
+                            'updateType': 'UPDATE'
+                        })
+                    
+                    if not settings_updates:
+                        continue
+                    
+                    # Save exported data (as JSON, not YAML)
+                    scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                    
+                    # Export settings data as JSON
+                    export_file = self.export_dir / f"settings_{category}{scope_suffix}.json"
+                    try:
+                        export_file.write_text(json.dumps(settings_updates, indent=2))
+                        print(f"  Exported JSON to {export_file}")
+                    except Exception as e:
+                        print(f"  Failed to export settings data: {e}")
+                    
+                    # Migrate to destination (skip in dry-run mode)
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would update {len(settings_updates)} settings in category {category}")
+                        results['success'] += len(settings_updates)
+                    else:
+                        # Use update endpoint with settings updates
+                        if self.dest_client.update_settings(
+                            settings_updates=settings_updates,
+                            org_identifier=org_id,
+                            project_identifier=project_id
+                        ):
+                            results['success'] += len(settings_updates)
+                        else:
+                            results['failed'] += len(settings_updates)
+                    
+                    time.sleep(0.5)  # Rate limiting
+                    
+                except Exception as e:
+                    # Gracefully handle errors (e.g., category not available)
+                    print(f"  Skipping category {category} due to error: {e}")
+                    continue
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -4327,6 +4498,10 @@ class HarnessMigrator:
         if 'resource-groups' in resource_types:
             all_results['resource_groups'] = self.migrate_resource_groups()
         
+        # Settings are migrated after organizations and projects (they can reference them)
+        if 'settings' in resource_types:
+            all_results['settings'] = self.migrate_settings()
+        
         return all_results
 
 
@@ -4337,8 +4512,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
