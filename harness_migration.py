@@ -102,7 +102,7 @@ class HarnessAPIClient:
                         page_param_name: str = 'page', size_param_name: str = 'size',
                         content_path: str = 'data.content', total_pages_path: str = 'data.totalPages',
                         total_elements_path: str = 'data.totalElements',
-                        pagination_in_body: bool = False) -> List[Dict]:
+                        pagination_in_body: bool = False, headers: Optional[Dict] = None) -> List[Dict]:
         """
         Fetch all pages of a paginated API endpoint
         
@@ -114,10 +114,11 @@ class HarnessAPIClient:
             page_size: Number of items per page
             page_param_name: Name of the page parameter (default: 'page')
             size_param_name: Name of the size parameter (default: 'size')
-            content_path: JSON path to the content array (default: 'data.content')
-            total_pages_path: JSON path to total pages count (default: 'data.totalPages')
+            content_path: JSON path to the content array (default: 'data.content'). Use empty string '' for direct array responses
+            total_pages_path: JSON path to total pages count (default: 'data.totalPages'). Use empty string '' if not available
             total_elements_path: JSON path to total elements count (default: 'data.totalElements')
             pagination_in_body: If True, pagination params go in request body; if False, in query params (default: False)
+            headers: Optional custom headers to include in requests
         
         Returns:
             List of all items across all pages
@@ -143,7 +144,7 @@ class HarnessAPIClient:
                 request_params[size_param_name] = page_size
                 request_data = data
             
-            response = self._make_request(method, endpoint, params=request_params, data=request_data)
+            response = self._make_request(method, endpoint, params=request_params, data=request_data, headers=headers)
             
             if response.status_code != 200:
                 print(f"Failed to fetch page {page}: {response.status_code} - {response.text}")
@@ -152,13 +153,18 @@ class HarnessAPIClient:
             response_data = response.json()
             
             # Extract content using the content_path
-            content = response_data
-            for key in content_path.split('.'):
-                if isinstance(content, dict):
-                    content = content.get(key, [])
-                else:
-                    content = []
-                    break
+            if not content_path or content_path == '':
+                # Direct array response (no nesting)
+                content = response_data if isinstance(response_data, list) else []
+            else:
+                content = response_data
+                for key in content_path.split('.'):
+                    if key:  # Skip empty strings from split
+                        if isinstance(content, dict):
+                            content = content.get(key, [])
+                        else:
+                            content = []
+                            break
             
             if not isinstance(content, list):
                 content = []
@@ -921,6 +927,132 @@ class HarnessAPIClient:
         else:
             print(f"Failed to import override from GitX: {response.status_code} - {response.text}")
             return False
+    
+    def list_webhooks(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all webhooks with pagination support
+        
+        Uses POST /v1/webhooks/list (account level)
+        or POST /v1/orgs/{org}/webhooks/list (org level)
+        or POST /v1/orgs/{org}/projects/{project}/webhooks/list (project level)
+        Request body: empty JSON object {}
+        Response: Direct array (not nested)
+        """
+        # Build endpoint based on scope
+        if project_identifier and org_identifier:
+            endpoint = f"/v1/orgs/{org_identifier}/projects/{project_identifier}/webhooks/list"
+        elif org_identifier:
+            endpoint = f"/v1/orgs/{org_identifier}/webhooks/list"
+        else:
+            endpoint = "/v1/webhooks/list"
+        
+        params = {}
+        
+        # Add harness-account header
+        headers = {
+            'harness-account': self.account_id
+        }
+        
+        try:
+            # Use _fetch_paginated helper
+            # POST method, pagination in query params (limit/page), content is direct array (empty content_path)
+            # Request body is empty JSON object
+            return self._fetch_paginated(
+                method='POST',
+                endpoint=endpoint,
+                params=params,
+                data={},
+                page_size=100,
+                page_param_name='page',
+                size_param_name='limit',  # Webhook API uses 'limit' not 'size'
+                content_path='',  # Direct array response (not nested)
+                total_pages_path='',  # No total pages in response
+                pagination_in_body=False,  # Pagination in query params
+                headers=headers
+            )
+        except Exception as e:
+            print(f"Failed to list webhooks: {e}")
+            return []
+    
+    def get_webhook_data(self, webhook_identifier: str, org_identifier: Optional[str] = None,
+                         project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get webhook data using GET endpoint
+        
+        Uses GET /v1/webhooks/{identifier} (account level)
+        or GET /v1/orgs/{org}/webhooks/{identifier} (org level)
+        or GET /v1/orgs/{org}/projects/{project}/webhooks/{identifier} (project level)
+        Webhooks are always inline (not stored in GitX)
+        Response is a direct object (not nested under data)
+        """
+        # Build endpoint based on scope
+        if project_identifier and org_identifier:
+            endpoint = f"/v1/orgs/{org_identifier}/projects/{project_identifier}/webhooks/{webhook_identifier}"
+        elif org_identifier:
+            endpoint = f"/v1/orgs/{org_identifier}/webhooks/{webhook_identifier}"
+        else:
+            endpoint = f"/v1/webhooks/{webhook_identifier}"
+        
+        params = {}
+        
+        # Add harness-account header
+        headers = {
+            'harness-account': self.account_id
+        }
+        
+        response = self._make_request('GET', endpoint, params=params, headers=headers)
+        
+        if response.status_code == 200:
+            # Response is a direct object (not nested under data)
+            webhook_data = response.json()
+            return webhook_data
+        else:
+            print(f"Failed to get webhook data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_webhook(self, webhook_data: Dict, org_identifier: Optional[str] = None,
+                      project_identifier: Optional[str] = None) -> bool:
+        """Create/upsert webhook from webhook data (for inline resources)
+        
+        Uses POST /v1/webhooks (account level)
+        or POST /v1/orgs/{org}/webhooks (org level)
+        or POST /v1/orgs/{org}/projects/{project}/webhooks (project level)
+        Requires: webhook_identifier, webhook_name, spec (with webhook_type, connector_ref, etc.)
+        """
+        # Build endpoint based on scope
+        if project_identifier and org_identifier:
+            endpoint = f"/v1/orgs/{org_identifier}/projects/{project_identifier}/webhooks"
+        elif org_identifier:
+            endpoint = f"/v1/orgs/{org_identifier}/webhooks"
+        else:
+            endpoint = "/v1/webhooks"
+        
+        params = {}
+        
+        # Build request body from webhook data
+        # Use webhook_identifier and webhook_name (not identifier and name)
+        request_body = {
+            'webhook_identifier': webhook_data.get('webhook_identifier') or webhook_data.get('identifier'),
+            'webhook_name': webhook_data.get('webhook_name') or webhook_data.get('name'),
+            'spec': webhook_data.get('spec', {})
+        }
+        
+        # Add optional fields if present
+        if 'is_enabled' in webhook_data:
+            request_body['is_enabled'] = webhook_data.get('is_enabled')
+        
+        # Add harness-account header
+        headers = {
+            'harness-account': self.account_id
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body, headers=headers)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created webhook")
+            return True
+        else:
+            print(f"Failed to create webhook: {response.status_code} - {response.text}")
+            return False
+    
     
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
@@ -2611,6 +2743,81 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_webhooks(self) -> Dict[str, Any]:
+        """Migrate webhooks at all scopes (account, org, project)
+        
+        Webhooks are always inline (not stored in GitX).
+        Uses /v1/webhooks for listing and creation.
+        Webhooks use JSON structure with webhook_identifier, webhook_name, and spec (not YAML).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Webhooks ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # Webhooks are account-level only (no org/project scope based on examples)
+        # But we'll still iterate through scopes in case they support it
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing webhooks at {scope_label} ---")
+            
+            webhooks = self.source_client.list_webhooks(org_id, project_id)
+            
+            for webhook in webhooks:
+                # Webhook data is directly in the list response (not nested)
+                # Use webhook_identifier and webhook_name (not identifier and name)
+                identifier = webhook.get('webhook_identifier', '')
+                name = webhook.get('webhook_name', identifier)
+                
+                print(f"\nProcessing webhook: {name} ({identifier}) at {scope_label}")
+                
+                # Get full webhook data
+                webhook_data = self.source_client.get_webhook_data(
+                    identifier, org_id, project_id
+                )
+                
+                # If GET failed, try using data from list
+                if not webhook_data:
+                    webhook_data = webhook
+                
+                if not webhook_data:
+                    print(f"  Failed to get data for webhook {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Webhooks are always inline
+                print(f"  Webhook storage type: Inline")
+                
+                # Save exported data (as JSON, not YAML)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Export webhook data as JSON
+                export_file = self.export_dir / f"webhook_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(webhook_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export webhook data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create webhook (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    # Use create endpoint with webhook data
+                    if self.dest_client.create_webhook(
+                        webhook_data=webhook_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -3237,6 +3444,10 @@ class HarnessMigrator:
         if 'triggers' in resource_types:
             all_results['triggers'] = self.migrate_triggers()
         
+        # Webhooks are migrated after triggers (webhooks might be used by triggers)
+        if 'webhooks' in resource_types:
+            all_results['webhooks'] = self.migrate_webhooks()
+        
         return all_results
 
 
@@ -3247,8 +3458,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

@@ -77,6 +77,30 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: JSON with `type`, `environmentRef`, `orgIdentifier` (optional), `projectIdentifier` (optional), `infraIdentifier` (optional), `serviceRef` (optional)
   - **Note**: Does NOT include `identifier`, `spec`, or `yaml` in request body (only metadata)
 
+### Webhooks
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses v1 API endpoints (not ng/api)
+- **Account Level**:
+  - `POST /v1/webhooks/list` - List webhooks
+  - `GET /v1/webhooks/{identifier}` - Get webhook data
+  - `POST /v1/webhooks` - Create webhook
+- **Organization Level**:
+  - `POST /v1/orgs/{org}/webhooks/list` - List webhooks
+  - `GET /v1/orgs/{org}/webhooks/{identifier}` - Get webhook data
+  - `POST /v1/orgs/{org}/webhooks` - Create webhook
+- **Project Level**:
+  - `POST /v1/orgs/{org}/projects/{project}/webhooks/list` - List webhooks
+  - `GET /v1/orgs/{org}/projects/{project}/webhooks/{identifier}` - Get webhook data
+  - `POST /v1/orgs/{org}/projects/{project}/webhooks` - Create webhook
+- **Common Parameters**:
+  - Query parameters (for list): `limit`, `page`
+  - Request body (for list): Empty JSON object `{}`
+  - Request body (for create): JSON with `webhook_identifier`, `webhook_name`, `spec` (object with `webhook_type`, `connector_ref`, `repo_name`, `folder_paths`), optional `is_enabled`
+  - Headers: `harness-account` (account identifier)
+  - Response: Direct array/object (not nested under `data`)
+  - **Note**: Webhooks use JSON structure with `spec` object (not YAML)
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

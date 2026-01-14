@@ -17,6 +17,7 @@ This Python script migrates resources from one Harness account to another using 
   - Templates (with version support - migrates all versions)
   - Input Sets (child entities of pipelines)
   - Triggers (child entities of pipelines)
+  - Webhooks (can be used by triggers)
 - **Automatic Storage Detection**: Detects whether resources are stored inline or in GitX (Git Experience)
 - **Dual Migration Support**: 
   - Inline resources: Migrated using YAML content via import APIs

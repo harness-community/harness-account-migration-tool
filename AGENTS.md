@@ -72,6 +72,7 @@ The `is_gitx_resource()` method automatically detects storage method by checking
   - **harnessSecretManager Secrets**: Migrated separately before other secrets, uses dummy value "changeme"
   - **Other Secrets**: Migrated after harnessSecretManager secrets
 - **Environments, Infrastructures, Services, Pipelines, Templates, Overrides**: Can be GitX or Inline (varies by resource and account configuration)
+- **Webhooks**: Always Inline (NOT stored in GitX)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
 
@@ -134,9 +135,10 @@ Resources are migrated in dependency order:
 14. **Other Templates** (fourteenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
 15. **Pipelines** (fifteenth - may reference all other resources including templates)
 16. **Input Sets** (sixteenth - child entities of pipelines, must be migrated after pipelines)
-17. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
+17. **Triggers** (seventeenth - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
+18. **Webhooks** (last - may be used by triggers, migrated after triggers)
 
-**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
+**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated. Webhooks are always inline and do not support GitX storage.
 
 **Default Resources**: The following default resources are automatically skipped during migration:
 - Organization with identifier "default"

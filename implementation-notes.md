@@ -30,6 +30,7 @@ This file contains implementation-specific details, quirks, and special handling
 - Organizations: `item.get('organization', item)`
 - Secrets: `item.get('secret', item)` (v2 API)
 - Input Sets: `item.get('inputSet', item)`
+- Webhooks: `item.get('webhook', item)`
 
 **Exceptions**:
 - **Templates**: May return flat objects (check response structure)
@@ -52,6 +53,7 @@ data.get('data', {}).get('resourceName', data.get('data', {}))
 - Templates: `data.template`
 - Triggers: Directly in `data` (not nested under `trigger`)
 - Overrides: Directly in `data` (not nested under `override`)
+- Webhooks: `data.webhook` (or directly in `data` if not nested)
 
 ## Field Name Variations
 
@@ -136,6 +138,21 @@ Different resources use different field names for YAML content:
 - Import query parameters: `accountIdentifier`, `connectorRef`, `isHarnessCodeRepo`, `repoName`, `branch`, `filePath`
 - **List Response**: NOT nested under an `override` key - access fields directly from list items
 - **Get Response**: Data is directly in `data` field (not nested under `override` key)
+
+### Webhooks
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX, even when used by GitX pipelines)
+- **API Version**: Uses v1 API endpoints (not ng/api)
+- **Data Format**: JSON structure with `spec` object (not YAML)
+- List endpoint: `POST /v1/webhooks/list` with `limit` and `page` query parameters, empty JSON body `{}`
+- List pagination: Uses `limit` and `page` query parameters
+- Get endpoint: `GET /v1/webhooks/{identifier}` (no query parameters needed)
+- Create endpoint: `POST /v1/webhooks` with JSON body containing `webhook_identifier`, `webhook_name`, `spec` object
+- **Headers**: Requires `harness-account` header (account identifier) in addition to `x-api-key`
+- **List Response**: Direct array (not nested) - access fields directly from list items
+- **Get Response**: Direct object (not nested under `data` or `webhook` key)
+- **Field Names**: Uses `webhook_identifier` and `webhook_name` (not `identifier` and `name`)
+- **Spec Object**: Contains `webhook_type`, `connector_ref`, `repo_name`, `folder_paths` array
 
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
