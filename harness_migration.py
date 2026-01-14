@@ -5289,6 +5289,10 @@ def main():
                        choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        help='Resource types to migrate')
+    parser.add_argument('--exclude-resource-types', nargs='+',
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       default=[],
+                       help='Resource types to exclude from migration (takes precedence over --resource-types)')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
     parser.add_argument('--dry-run', action='store_true',
@@ -5317,6 +5321,16 @@ def main():
     if not args.dry_run:
         dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url)
     
+    # Apply exclusions: remove excluded resource types from the list
+    # Exclusions take precedence over inclusions
+    excluded_types = set(args.exclude_resource_types) if args.exclude_resource_types else set()
+    final_resource_types = [rt for rt in args.resource_types if rt not in excluded_types]
+    
+    # Warn if any excluded types were in the include list
+    excluded_but_included = excluded_types.intersection(set(args.resource_types))
+    if excluded_but_included:
+        print(f"Warning: The following resource types were excluded even though they were in --resource-types: {', '.join(sorted(excluded_but_included))}")
+    
     # Create migrator
     migrator = HarnessMigrator(
         source_client, dest_client, args.org_identifier, args.project_identifier, args.dry_run
@@ -5332,11 +5346,13 @@ def main():
         print(f"Organization: {args.org_identifier}")
     if args.project_identifier:
         print(f"Project: {args.project_identifier}")
-    print(f"Resource Types: {', '.join(args.resource_types)}")
+    print(f"Resource Types: {', '.join(final_resource_types)}")
+    if excluded_types:
+        print(f"Excluded Resource Types: {', '.join(sorted(excluded_types))}")
     if args.dry_run:
         print("\n[DRY RUN MODE] Resources will be listed and exported but NOT migrated")
     
-    results = migrator.migrate_all(args.resource_types)
+    results = migrator.migrate_all(final_resource_types)
     
     # Print summary
     print("\n" + "="*50)

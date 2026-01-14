@@ -115,6 +115,27 @@ python harness_migration.py \
   --resource-types connectors services pipelines
 ```
 
+### Exclude Resource Types
+
+You can exclude specific resource types from migration using the `--exclude-resource-types` argument. Excluded types take precedence over included types - if a resource type is in both `--resource-types` and `--exclude-resource-types`, it will be excluded.
+
+```bash
+# Exclude pipelines and triggers from migration (even if they're in the default list)
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --dest-api-key YOUR_DEST_API_KEY \
+  --exclude-resource-types pipelines triggers
+
+# Include only connectors and secrets, but exclude secrets (result: only connectors migrate)
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --dest-api-key YOUR_DEST_API_KEY \
+  --resource-types connectors secrets \
+  --exclude-resource-types secrets
+```
+
+**Note**: The `--exclude-resource-types` argument always takes precedence. If a resource type is specified in both `--resource-types` and `--exclude-resource-types`, it will be excluded from migration.
+
 ### Available Resource Types
 
 - `organizations` - Organizations (account-level)
@@ -128,6 +149,15 @@ python harness_migration.py \
 - `templates` - Templates (supports both inline and GitX storage, migrates all versions of each template)
 - `input-sets` - Input sets (child entities of pipelines, migrated after pipelines)
 - `triggers` - Triggers (child entities of pipelines, migrated after input sets)
+- `webhooks` - Webhooks (can be used by triggers)
+- `policies` - Policies (Harness governance policies)
+- `policy-sets` - Policy sets (collections of policies)
+- `roles` - Roles (access control roles)
+- `resource-groups` - Resource groups (collections of resources for access control)
+- `settings` - Settings (account, organization, and project-level settings)
+- `ip-allowlists` - IP allowlists (account-level IP allowlist configurations)
+- `users` - Users (Harness users with role bindings)
+- `service-accounts` - Service accounts (Harness service accounts with role bindings)
 
 ## Output
 
