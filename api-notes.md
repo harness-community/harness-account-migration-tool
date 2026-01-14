@@ -59,6 +59,24 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Query parameters: `accountIdentifier`, `serviceIdentifier`, `connectorRef`, `repoName`, `branch`, `filePath`
   - No request body
 
+### Overrides
+- **Scope**: Account, Organization, and Project levels
+- `POST /ng/api/serviceOverrides/v2/list` - List overrides
+  - Request body: `null` (POST with null body)
+  - Query parameters: `routingId` (account identifier), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `type` (optional), `size`, `page`
+  - Response: Paginated with `data.content` array
+- `GET /ng/api/serviceOverrides/{identifier}` - Get override data
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `repoName` (optional, for GitX), `loadFromFallbackBranch` (optional, for GitX)
+  - Response: Override data in `data` field (not nested under 'override' key)
+  - For GitX overrides: Includes `entityGitInfo` with git details (`repoName`, `branch`, `filePath`)
+- `POST /ng/api/serviceOverrides/upsert` - Create/upsert override (for inline resources)
+  - Query parameters: `routingId` (account identifier)
+  - Request body: JSON with `type`, `environmentRef`, `identifier`, `spec`, `yaml`, `orgIdentifier` (optional), `projectIdentifier` (optional), `infraIdentifier` (optional), `serviceRef` (optional)
+- `POST /ng/api/serviceOverrides/import` - Import override from GitX
+  - Query parameters: `accountIdentifier`, `connectorRef`, `isHarnessCodeRepo`, `repoName`, `branch`, `filePath`
+  - Request body: JSON with `type`, `environmentRef`, `orgIdentifier` (optional), `projectIdentifier` (optional), `infraIdentifier` (optional), `serviceRef` (optional)
+  - **Note**: Does NOT include `identifier`, `spec`, or `yaml` in request body (only metadata)
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

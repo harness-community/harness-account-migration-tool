@@ -71,7 +71,7 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 - **Secrets**: Always Inline (not tracked via GitX)
   - **harnessSecretManager Secrets**: Migrated separately before other secrets, uses dummy value "changeme"
   - **Other Secrets**: Migrated after harnessSecretManager secrets
-- **Environments, Infrastructures, Services, Pipelines, Templates**: Can be GitX or Inline (varies by resource and account configuration)
+- **Environments, Infrastructures, Services, Pipelines, Templates, Overrides**: Can be GitX or Inline (varies by resource and account configuration)
 - **Input Sets**: Can be GitX or Inline (inherits from parent pipeline)
 - **Triggers**: Always Inline (NOT stored in GitX, even for GitX pipelines)
 
@@ -130,12 +130,13 @@ Resources are migrated in dependency order:
 10. **Environments** (tenth - may be referenced by infrastructures)
 11. **Infrastructures** (eleventh - depend on environments)
 12. **Services** (twelfth - may reference connectors and environments)
-13. **Other Templates** (thirteenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
-14. **Pipelines** (fourteenth - may reference all other resources including templates)
-15. **Input Sets** (fifteenth - child entities of pipelines, must be migrated after pipelines)
-16. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
+13. **Overrides** (thirteenth - may reference environments, infrastructures, and services)
+14. **Other Templates** (fourteenth - Pipeline, Stage, Step, StepGroup, MonitoredService, and other types - must be migrated before pipelines)
+15. **Pipelines** (fifteenth - may reference all other resources including templates)
+16. **Input Sets** (sixteenth - child entities of pipelines, must be migrated after pipelines)
+17. **Triggers** (last - child entities of pipelines, must be migrated after input sets as triggers may reference input sets)
 
-**Note**: Environments, infrastructures, services, pipelines, and templates automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
+**Note**: Environments, infrastructures, services, pipelines, templates, and overrides automatically detect their storage type (inline vs GitX) and use the appropriate migration method for each individual resource. Templates are versioned - all versions of each template are migrated.
 
 **Default Resources**: The following default resources are automatically skipped during migration:
 - Organization with identifier "default"

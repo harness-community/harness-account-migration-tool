@@ -12,6 +12,7 @@ This Python script migrates resources from one Harness account to another using 
   - Environments
   - Infrastructures
   - Services
+  - Overrides (Harness CD overrides for environments, infrastructures, and services)
   - Pipelines
   - Templates (with version support - migrates all versions)
   - Input Sets (child entities of pipelines)

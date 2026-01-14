@@ -34,6 +34,7 @@ This file contains implementation-specific details, quirks, and special handling
 **Exceptions**:
 - **Templates**: May return flat objects (check response structure)
 - **Triggers**: NOT nested - data is directly in list items (no `trigger` key)
+- **Overrides**: NOT nested - data is directly in list items (no `override` key)
 
 ### Get Response Structure
 When getting individual resource data, extract from nested structure:
@@ -50,6 +51,7 @@ data.get('data', {}).get('resourceName', data.get('data', {}))
 - Pipelines: `data.pipeline`
 - Templates: `data.template`
 - Triggers: Directly in `data` (not nested under `trigger`)
+- Overrides: Directly in `data` (not nested under `override`)
 
 ## Field Name Variations
 
@@ -119,6 +121,22 @@ Different resources use different field names for YAML content:
   - Query parameters: `storeType: INLINE`, `ignoreError`, `routingId`, `accountIdentifier`, `targetIdentifier`
 - **List Response**: NOT nested under a `trigger` key - access fields directly from list items
 
+### Overrides
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Can be GitX or Inline (varies by override and account configuration)
+- YAML field: `yaml` in get response (located in `data.yaml`)
+- List endpoint: `POST /ng/api/serviceOverrides/v2/list` with `null` body (POST method, not GET)
+- List pagination: Uses `page` and `size` query parameters (not `pageIndex`/`pageSize`)
+- Get endpoint: For GitX overrides, requires `repoName` and `loadFromFallbackBranch` query parameters
+- GitX detection: Check for `entityGitInfo` field in get response (not `gitDetails` or `entityGitDetails`)
+- GitX git details: Extract from `entityGitInfo` field (`repoName`, `branch`, `filePath`)
+- Create endpoint (inline): `POST /ng/api/serviceOverrides/upsert` with `routingId` query parameter
+- Import endpoint (GitX): `POST /ng/api/serviceOverrides/import` (different from create endpoint)
+- Import request body: Only includes metadata (`type`, `environmentRef`, `orgIdentifier`, `projectIdentifier`, optional `infraIdentifier`, `serviceRef`) - does NOT include `identifier`, `spec`, or `yaml`
+- Import query parameters: `accountIdentifier`, `connectorRef`, `isHarnessCodeRepo`, `repoName`, `branch`, `filePath`
+- **List Response**: NOT nested under an `override` key - access fields directly from list items
+- **Get Response**: Data is directly in `data` field (not nested under `override` key)
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated
@@ -141,9 +159,12 @@ Different resources use different field names for YAML content:
 
 The `is_gitx_resource()` method detects storage method by checking:
 1. `storeType` field: `REMOTE` = GitX, `INLINE` = Inline
-2. Presence of `gitDetails` or `entityGitDetails` field
+2. Presence of `gitDetails`, `entityGitDetails`, or `entityGitInfo` field
 3. Git-related fields (`repo`, `branch`)
 4. Default: Inline if no indicators found
+
+**Resource-Specific GitX Detection**:
+- **Overrides**: Check for `entityGitInfo` field (not `gitDetails`)
 
 ## Content-Type Exceptions
 
