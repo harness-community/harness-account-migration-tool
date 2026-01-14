@@ -84,6 +84,7 @@ The following default resources are automatically skipped during migration:
 - Project with identifier "default_project"
 - Connector "harnessImage" at account level
 - Connector "harnessSecretManager" at all scopes (account, org, and project levels)
+- Policies with identifiers matching pattern "builtin-example-policy-[0-9]+" (built-in example policies)
 
 Skipped resources are logged and counted in the migration results.
 

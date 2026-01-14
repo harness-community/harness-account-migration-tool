@@ -11,6 +11,7 @@ import json
 import yaml
 import os
 import sys
+import re
 from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import time
@@ -2044,6 +2045,17 @@ class HarnessMigrator:
         ]
         return connector_type in secret_manager_types
     
+    def _is_builtin_example_policy(self, policy_identifier: str) -> bool:
+        """Check if a policy is a built-in example policy that should be skipped
+        
+        Built-in example policies have IDs matching the pattern: builtin-example-policy-[0-9]+
+        """
+        if not policy_identifier:
+            return False
+        # Match pattern: builtin-example-policy followed by one or more digits
+        pattern = r'^builtin-example-policy-\d+$'
+        return bool(re.match(pattern, policy_identifier))
+    
     def migrate_custom_secret_manager_connectors(self) -> Dict[str, Any]:
         """Migrate custom secret manager connectors at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -2941,6 +2953,12 @@ class HarnessMigrator:
                 # Policy data is directly in the list response (not nested)
                 identifier = policy.get('identifier', '')
                 name = policy.get('name', identifier)
+                
+                # Skip built-in example policies
+                if self._is_builtin_example_policy(identifier):
+                    print(f"\nSkipping built-in example policy: {name} ({identifier})")
+                    results['skipped'] += 1
+                    continue
                 
                 print(f"\nProcessing policy: {name} ({identifier}) at {scope_label}")
                 
