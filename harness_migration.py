@@ -89,13 +89,23 @@ class HarnessAPIClient:
                 else:
                     response = requests.post(url, headers=request_headers, params=params, json=data)
             elif method.upper() == 'PUT':
-                response = requests.put(url, headers=request_headers, params=params, json=data if isinstance(data, dict) else None)
+                # If data is a string, send it as raw data; otherwise send as JSON
+                if isinstance(data, str):
+                    response = requests.put(url, headers=request_headers, params=params, data=data)
+                else:
+                    response = requests.put(url, headers=request_headers, params=params, json=data)
             elif method.upper() == 'PATCH':
                 # If data is a string, send it as raw data; otherwise send as JSON
                 if isinstance(data, str):
                     response = requests.patch(url, headers=request_headers, params=params, data=data)
                 else:
                     response = requests.patch(url, headers=request_headers, params=params, json=data)
+            elif method.upper() == 'PUT':
+                # If data is a string, send it as raw data; otherwise send as JSON
+                if isinstance(data, str):
+                    response = requests.put(url, headers=request_headers, params=params, data=data)
+                else:
+                    response = requests.put(url, headers=request_headers, params=params, json=data)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -1284,6 +1294,157 @@ class HarnessAPIClient:
             print(f"Failed to create policy set: {response.status_code} - {response.text}")
             return False
     
+    def list_roles(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all roles with pagination support
+        
+        Uses GET /authz/api/roles endpoint
+        Response: Nested under data.content, each item has 'role' key
+        Pagination uses pageIndex and pageSize (not page and size)
+        """
+        endpoint = "/authz/api/roles"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use _fetch_paginated helper with GET method
+            # Pagination uses pageIndex and pageSize
+            # Response is nested: data.content array, each item has 'role' key
+            all_roles = []
+            page_index = 0
+            page_size = 100
+            
+            while True:
+                params['pageIndex'] = page_index
+                params['pageSize'] = page_size
+                
+                response = self._make_request('GET', endpoint, params=params)
+                
+                if response.status_code != 200:
+                    print(f"Failed to list roles: {response.status_code} - {response.text}")
+                    break
+                
+                data = response.json()
+                # Extract from nested structure: data.content
+                content = data.get('data', {}).get('content', [])
+                
+                if not content:
+                    break
+                
+                # Extract role data from each item (each has a 'role' key)
+                for item in content:
+                    role_data = item.get('role', item)
+                    all_roles.append(role_data)
+                
+                # Check if there are more pages
+                total_pages = data.get('data', {}).get('totalPages', 1)
+                if page_index >= total_pages - 1:
+                    break
+                
+                page_index += 1
+            
+            return all_roles
+        except Exception as e:
+            print(f"Failed to list roles: {e}")
+            return []
+    
+    def get_role_data(self, role_identifier: str, org_identifier: Optional[str] = None,
+                     project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get role data - try GET endpoint, fallback to list if needed
+        
+        Uses GET /authz/api/roles/{identifier} if available
+        Otherwise, we can get role data from list response
+        Response structure may vary
+        """
+        endpoint = f"/authz/api/roles/{role_identifier}"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Response may be nested under data.role
+            role_data = data.get('data', {}).get('role', data.get('data', data))
+            return role_data
+        else:
+            # If GET fails, return None (caller can use list data)
+            print(f"Failed to get role data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_role(self, role_data: Dict, org_identifier: Optional[str] = None,
+                   project_identifier: Optional[str] = None) -> bool:
+        """Create and update role from role data
+        
+        Harness requires a two-step process:
+        1. Create role with POST /authz/api/roles (without permissions)
+        2. Update role with PUT /authz/api/roles/{identifier} (with permissions)
+        """
+        identifier = role_data.get('identifier')
+        if not identifier:
+            print("Role identifier is required")
+            return False
+        
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Step 1: Create role with POST (without permissions)
+        create_endpoint = "/authz/api/roles"
+        create_body = {
+            'identifier': identifier,
+            'name': role_data.get('name', identifier)
+        }
+        
+        # Add optional fields for creation (but not permissions)
+        if 'description' in role_data:
+            create_body['description'] = role_data.get('description')
+        if 'tags' in role_data:
+            create_body['tags'] = role_data.get('tags')
+        
+        create_response = self._make_request('POST', create_endpoint, params=params, data=create_body)
+        
+        if create_response.status_code not in [200, 201]:
+            print(f"Failed to create role: {create_response.status_code} - {create_response.text}")
+            return False
+        
+        # Step 2: Update role with PUT to add permissions and allowedScopeLevels
+        update_endpoint = f"/authz/api/roles/{identifier}"
+        update_body = {
+            'identifier': identifier,
+            'name': role_data.get('name', identifier),
+            'permissions': role_data.get('permissions', []),
+            'allowedScopeLevels': role_data.get('allowedScopeLevels', [])
+        }
+        
+        # Add optional fields
+        if 'description' in role_data:
+            update_body['description'] = role_data.get('description')
+        if 'tags' in role_data:
+            update_body['tags'] = role_data.get('tags')
+        
+        update_response = self._make_request('PUT', update_endpoint, params=params, data=update_body)
+        
+        if update_response.status_code in [200, 201]:
+            print(f"Successfully created and updated role")
+            return True
+        else:
+            print(f"Failed to update role with permissions: {update_response.status_code} - {update_response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -2188,6 +2349,24 @@ class HarnessMigrator:
         # Match pattern: builtin-example-policy followed by one or more digits
         pattern = r'^builtin-example-policy-\d+$'
         return bool(re.match(pattern, policy_identifier))
+    
+    def _is_builtin_resource_group(self, identifier: str) -> bool:
+        """Check if a resource group identifier is built-in (starts with underscore)
+        
+        Built-in resource groups have IDs that start with "_" and should be skipped during migration.
+        """
+        if not identifier:
+            return False
+        return identifier.startswith('_')
+    
+    def _is_builtin_role(self, identifier: str) -> bool:
+        """Check if a role identifier is built-in (starts with underscore)
+        
+        Built-in roles have IDs that start with "_" and should be skipped during migration.
+        """
+        if not identifier:
+            return False
+        return identifier.startswith('_')
     
     def migrate_custom_secret_manager_connectors(self) -> Dict[str, Any]:
         """Migrate custom secret manager connectors at all scopes (account, org, project)"""
@@ -3221,6 +3400,87 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_roles(self) -> Dict[str, Any]:
+        """Migrate roles at all scopes (account, org, project)
+        
+        Roles use /authz/api/roles endpoints.
+        Roles are always inline (not stored in GitX).
+        Roles should be migrated after organizations and projects are created.
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Roles ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing roles at {scope_label} ---")
+            
+            roles = self.source_client.list_roles(org_id, project_id)
+            
+            for role in roles:
+                # Role data is already extracted from 'role' key in list_roles
+                # But handle both cases (nested or direct) - list_roles already extracts it
+                # So role should already be the role data object
+                role_data = role.get('role', role) if isinstance(role, dict) and 'role' in role else role
+                identifier = role_data.get('identifier', '')
+                name = role_data.get('name', identifier)
+                
+                # Skip built-in roles (IDs starting with "_")
+                if self._is_builtin_role(identifier):
+                    print(f"\nSkipping built-in role: {name} ({identifier})")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing role: {name} ({identifier}) at {scope_label}")
+                
+                # Get full role data
+                full_role_data = self.source_client.get_role_data(
+                    identifier, org_id, project_id
+                )
+                
+                # If GET failed, use data from list (already extracted)
+                if not full_role_data:
+                    full_role_data = role_data
+                
+                if not full_role_data:
+                    print(f"  Failed to get data for role {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Roles are always inline
+                print(f"  Role storage type: Inline")
+                
+                # Save exported data (as JSON, not YAML)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Export role data as JSON
+                export_file = self.export_dir / f"role_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(full_role_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export role data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create role (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    # Use create endpoint with role data
+                    if self.dest_client.create_role(
+                        role_data=full_role_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -3859,6 +4119,10 @@ class HarnessMigrator:
         if 'policy-sets' in resource_types:
             all_results['policy_sets'] = self.migrate_policy_sets()
         
+        # Roles are migrated after organizations and projects (they can reference them)
+        if 'roles' in resource_types:
+            all_results['roles'] = self.migrate_roles()
+        
         return all_results
 
 
@@ -3869,8 +4133,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

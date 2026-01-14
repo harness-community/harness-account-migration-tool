@@ -134,6 +134,26 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: JSON with `identifier`, `name`, `type`, `action`, `description`, `enabled`, optional `policies` (array of policy references with `identifier` and `severity`)
   - **Note**: Policy sets reference policies, so policies must be migrated first. Uses POST method (not PATCH), identifier in request body (not URL path).
 
+### Roles
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses authz/api endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with `permissions` array (not YAML)
+- `GET /authz/api/roles` - List roles
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `pageIndex`, `pageSize`
+  - Response: Nested under `data.content` array, each item has `role` key containing role data
+  - **Note**: Pagination uses `pageIndex` and `pageSize` (not `page` and `size`)
+- `GET /authz/api/roles/{identifier}` - Get role data
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Response: Nested under `data.role` (may vary)
+- `POST /authz/api/roles` - Create role (without permissions)
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with `identifier`, `name`, optional `description`, `tags` (NO permissions or allowedScopeLevels)
+- `PUT /authz/api/roles/{identifier}` - Update role (with permissions)
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with `identifier`, `name`, `permissions` (array), `allowedScopeLevels` (array), optional `description`, `tags`
+  - **Note**: Harness requires a two-step process: first create with POST (without permissions), then update with PUT (with permissions). Roles can reference organizations and projects, so they should be migrated after organizations and projects are created.
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

@@ -186,6 +186,24 @@ Different resources use different field names for YAML content:
 - **Export Format**: Policy sets are exported as `.json` files (not `.yaml`)
 - **Dependencies**: Policy sets reference policies, so policies must be migrated first
 
+### Roles
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses authz/api endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with `permissions` array (not YAML)
+- List endpoint: `GET /authz/api/roles` with `pageIndex` and `pageSize` query parameters (not `page` and `size`)
+- List pagination: Uses `pageIndex` and `pageSize` query parameters
+- List response: Nested under `data.content` array, each item has `role` key containing role data
+- Get endpoint: `GET /authz/api/roles/{identifier}` (response may be nested under `data.role`)
+- Create endpoint: Two-step process required:
+  1. `POST /authz/api/roles` (no identifier in path) with JSON body containing `identifier`, `name`, optional `description`, `tags` (NO permissions)
+  2. `PUT /authz/api/roles/{identifier}` (identifier in path) with JSON body containing `identifier`, `name`, `permissions` array, `allowedScopeLevels` array, optional `description`, `tags`
+- **List Response**: Nested structure - extract from `data.content` array, then from `role` key in each item
+- **Get Response**: May be nested under `data.role`
+- **Required Parameter**: `routingId` (account identifier) is required for all role API calls
+- **Export Format**: Roles are exported as `.json` files (not `.yaml`)
+- **Dependencies**: Roles can reference organizations and projects, so they should be migrated after organizations and projects are created
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated
