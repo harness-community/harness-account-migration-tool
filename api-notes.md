@@ -214,6 +214,31 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Response: `{"status":"SUCCESS","data":{"addUserResponseMap":{"email":"USER_INVITED_SUCCESSFULLY" or "USER_ADDED_SUCCESSFULLY"}}}`
   - **Note**: Users reference roles and resource groups via role bindings, so they must be migrated after roles and resource groups are created.
 
+### Service Accounts
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses ng/api/serviceaccount endpoints
+- **Data Format**: Uses JSON structure (not YAML)
+- `GET /ng/api/serviceaccount/aggregate` - List service accounts
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `pageIndex`, `pageSize`, `sortOrders`
+  - Response: Nested under `data.content` array, each item has `serviceAccount` key and `roleAssignmentsMetadataDTO` array
+  - **Note**: Uses GET method, pagination uses `pageIndex` and `pageSize`
+- `GET /ng/api/serviceaccount/{identifier}` - Get service account data
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Response: Nested under `data.serviceAccount`
+- `POST /ng/api/serviceaccount` - Create service account
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with `identifier`, `name`, `description`, `tags`, `accountIdentifier`, `email`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - **Note**: Service accounts are created without role bindings. Role bindings must be added separately using `POST /authz/api/roleassignments/multi`
+- `POST /authz/api/roleassignments/multi` - Add role bindings to service account
+  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with `roleAssignments` array
+  - Each role assignment object contains:
+    - `resourceGroupIdentifier`: Identifier of the resource group
+    - `roleIdentifier`: Identifier of the role
+    - `principal`: Object with `identifier` (service account identifier), `type: "SERVICE_ACCOUNT"`, and `scopeLevel` ("account", "organization", or "project")
+  - **Note**: Service accounts reference roles and resource groups via role bindings, so they must be migrated after roles and resource groups are created.
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines

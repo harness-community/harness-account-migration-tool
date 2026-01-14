@@ -266,6 +266,29 @@ Different resources use different field names for YAML content:
 - **Export Format**: Users are exported as `.json` files (not `.yaml`), email is sanitized in filename (replaces @ with _at_)
 - **Dependencies**: Users reference roles and resource groups via role bindings, so they must be migrated after roles and resource groups are created
 
+### Service Accounts
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses ng/api/serviceaccount endpoints
+- **Data Format**: Uses JSON structure (not YAML)
+- List endpoint: `GET /ng/api/serviceaccount/aggregate` with `pageIndex` and `pageSize` query parameters
+- List pagination: Uses `pageIndex` and `pageSize` query parameters (not `page` and `size`)
+- List response: Nested under `data.content` array, each item has `serviceAccount` key and `roleAssignmentsMetadataDTO` array (note: it's `roleAssignmentsMetadataDTO`, not `roleAssignmentMetadata`)
+- Get endpoint: `GET /ng/api/serviceaccount/{identifier}` with `routingId` parameter
+- Get response: Nested under `data.serviceAccount`
+- Create endpoint: `POST /ng/api/serviceaccount` with JSON body containing `identifier`, `name`, `description`, `tags`, `accountIdentifier`, `email`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+- **Note**: Service accounts are created WITHOUT role bindings. Role bindings must be added separately.
+- Add role bindings endpoint: `POST /authz/api/roleassignments/multi` with JSON body containing `roleAssignments` array
+- **List Response**: Nested structure - extract from `data.content` array, then from `serviceAccount` key in each item, also include `roleAssignmentsMetadataDTO` (normalized to `roleAssignmentMetadata` for consistency)
+- **Create Request Body**: Contains `identifier`, `name`, `description`, `tags`, `accountIdentifier`, `email`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+- **Role Assignment Request Body**: Contains `roleAssignments` array, where each item has:
+  - `resourceGroupIdentifier`: Identifier of the resource group
+  - `roleIdentifier`: Identifier of the role
+  - `principal`: Object with `identifier` (service account identifier), `type: "SERVICE_ACCOUNT"`, and `scopeLevel` ("account", "organization", or "project")
+- **Required Parameter**: `routingId` (account identifier) is required for all service account API calls
+- **Export Format**: Service accounts are exported as `.json` files (not `.yaml`)
+- **Dependencies**: Service accounts reference roles and resource groups via role bindings, so they must be migrated after roles and resource groups are created
+
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
 - **Versioning**: Templates are versioned - all versions must be migrated

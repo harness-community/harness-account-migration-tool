@@ -1801,6 +1801,290 @@ class HarnessAPIClient:
             print(f"Failed to create user: {response.status_code} - {response.text}")
             return False
     
+    def list_service_accounts(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all service accounts with pagination support
+        
+        Uses GET /ng/api/serviceaccount/aggregate endpoint
+        Response: Nested under data.content, each item has 'serviceAccount' key and 'roleAssignmentsMetadataDTO' array
+        Pagination uses pageIndex and pageSize (not page and size)
+        """
+        endpoint = "/ng/api/serviceaccount/aggregate"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use custom pagination logic (similar to roles and resource groups)
+            # Pagination uses pageIndex and pageSize
+            all_service_accounts = []
+            page_index = 0
+            page_size = 100
+            
+            while True:
+                params['pageIndex'] = page_index
+                params['pageSize'] = page_size
+                
+                response = self._make_request('GET', endpoint, params=params)
+                
+                if response.status_code != 200:
+                    print(f"Failed to list service accounts: {response.status_code} - {response.text}")
+                    break
+                
+                data = response.json()
+                # Extract from nested structure: data.content
+                content = data.get('data', {}).get('content', [])
+                
+                if not content:
+                    break
+                
+                # Extract service account data from each item (each has a 'serviceAccount' key)
+                for item in content:
+                    service_account_data = item.get('serviceAccount', item)
+                    # Also include roleAssignmentsMetadataDTO for migration (note: it's roleAssignmentsMetadataDTO, not roleAssignmentMetadata)
+                    # This field is always present in the item, regardless of API key count
+                    role_assignments = item.get('roleAssignmentsMetadataDTO', [])
+                    if role_assignments is None:
+                        role_assignments = []
+                    # Combine service account data with role assignments
+                    service_account_with_roles = service_account_data.copy()
+                    service_account_with_roles['roleAssignmentMetadata'] = role_assignments  # Normalize to roleAssignmentMetadata for consistency
+                    all_service_accounts.append(service_account_with_roles)
+                
+                # Check if there are more pages
+                total_pages = data.get('data', {}).get('totalPages', 1)
+                if page_index >= total_pages - 1:
+                    break
+                
+                page_index += 1
+            
+            return all_service_accounts
+        except Exception as e:
+            print(f"Failed to list service accounts: {e}")
+            return []
+    
+    def get_service_account_data(self, service_account_identifier: str, org_identifier: Optional[str] = None,
+                                 project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get service account data using GET endpoint
+        
+        Uses GET /ng/api/serviceaccount/{identifier}
+        Response is nested under data.serviceAccount
+        """
+        endpoint = f"/ng/api/serviceaccount/{service_account_identifier}"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Response is nested under data.serviceAccount
+            service_account_data = data.get('data', {}).get('serviceAccount', data.get('data', {}))
+            return service_account_data
+        else:
+            print(f"Failed to get service account data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_service_account(self, service_account_data: Dict, org_identifier: Optional[str] = None,
+                               project_identifier: Optional[str] = None) -> bool:
+        """Create service account from service account data
+        
+        Uses POST /ng/api/serviceaccount endpoint
+        Request body: JSON with identifier, name, description, tags, accountIdentifier, email, roleBindings (array)
+        """
+        endpoint = "/ng/api/serviceaccount"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build request body from service account data
+        identifier = service_account_data.get('identifier')
+        if not identifier:
+            print("Service account identifier is required")
+            return False
+        
+        # Create service account WITHOUT role bindings (they will be added separately)
+        request_body = {
+            'identifier': identifier,
+            'name': service_account_data.get('name', identifier),
+            'description': service_account_data.get('description', ''),
+            'tags': service_account_data.get('tags', {}),
+            'accountIdentifier': self.account_id,  # Use accountIdentifier (not accountId)
+            'email': service_account_data.get('email', '')
+        }
+        
+        # Add orgIdentifier and projectIdentifier if present
+        if org_identifier:
+            request_body['orgIdentifier'] = org_identifier
+        if project_identifier:
+            request_body['projectIdentifier'] = project_identifier
+        
+        # Use POST method
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created service account")
+            return True
+        else:
+            print(f"Failed to create service account: {response.status_code} - {response.text}")
+            return False
+    
+    def add_role_bindings_to_service_account(self, service_account_identifier: str, role_bindings: List[Dict],
+                                            org_identifier: Optional[str] = None,
+                                            project_identifier: Optional[str] = None) -> bool:
+        """Add role bindings to an existing service account
+        
+        Uses POST /authz/api/roleassignments/multi endpoint
+        Request body: JSON with roleAssignments array
+        Each role assignment has resourceGroupIdentifier, roleIdentifier, and principal (with identifier, type, scopeLevel)
+        """
+        endpoint = "/authz/api/roleassignments/multi"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Determine scope level
+        if project_identifier:
+            scope_level = 'project'
+        elif org_identifier:
+            scope_level = 'organization'
+        else:
+            scope_level = 'account'
+        
+        # Build roleAssignments array from role_bindings
+        role_assignments = []
+        for role_binding in role_bindings:
+            role_assignment = {
+                'resourceGroupIdentifier': role_binding.get('resourceGroupIdentifier', ''),
+                'roleIdentifier': role_binding.get('roleIdentifier', ''),
+                'principal': {
+                    'identifier': service_account_identifier,
+                    'type': 'SERVICE_ACCOUNT',
+                    'scopeLevel': scope_level
+                }
+            }
+            role_assignments.append(role_assignment)
+        
+        # Build request body
+        request_body = {
+            'roleAssignments': role_assignments
+        }
+        
+        # Use POST method
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully added {len(role_assignments)} role binding(s) to service account")
+            return True
+        else:
+            print(f"Failed to add role bindings to service account: {response.status_code} - {response.text}")
+            return False
+    
+    def list_api_keys_for_service_account(self, service_account_identifier: str, org_identifier: Optional[str] = None,
+                                         project_identifier: Optional[str] = None) -> List[Dict]:
+        """List API keys for a service account
+        
+        Uses GET /ng/api/apikey/aggregate endpoint
+        Query parameters: apiKeyType=SERVICE_ACCOUNT, parentIdentifier={service_account_identifier}
+        """
+        endpoint = "/ng/api/apikey/aggregate"
+        params = {
+            'routingId': self.account_id,  # routingId is required
+            'apiKeyType': 'SERVICE_ACCOUNT',
+            'parentIdentifier': service_account_identifier
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            response = self._make_request('GET', endpoint, params=params)
+            
+            if response.status_code != 200:
+                print(f"Failed to list API keys for service account: {response.status_code} - {response.text}")
+                return []
+            
+            data = response.json()
+            # Extract from nested structure: data.content
+            content = data.get('data', {}).get('content', [])
+            
+            # Extract API key data from each item
+            api_keys = []
+            for item in content:
+                # API key data might be nested under 'apiKey' key or directly in item
+                api_key_data = item.get('apiKey', item)
+                api_keys.append(api_key_data)
+            
+            return api_keys
+        except Exception as e:
+            print(f"Failed to list API keys for service account: {e}")
+            return []
+    
+    def create_api_key_for_service_account(self, api_key_data: Dict, org_identifier: Optional[str] = None,
+                                          project_identifier: Optional[str] = None) -> bool:
+        """Create API key for a service account
+        
+        Uses POST /ng/api/apikey endpoint
+        Request body: JSON with identifier, name, description, tags, accountIdentifier, apiKeyType: "SERVICE_ACCOUNT", orgIdentifier, projectIdentifier, parentIdentifier
+        """
+        endpoint = "/ng/api/apikey"
+        params = {
+            'routingId': self.account_id  # routingId is required
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build request body from API key data
+        identifier = api_key_data.get('identifier')
+        if not identifier:
+            print("API key identifier is required")
+            return False
+        
+        request_body = {
+            'identifier': identifier,
+            'name': api_key_data.get('name', identifier),
+            'description': api_key_data.get('description', ''),
+            'tags': api_key_data.get('tags', {}),
+            'accountIdentifier': self.account_id,
+            'apiKeyType': 'SERVICE_ACCOUNT',
+            'parentIdentifier': api_key_data.get('parentIdentifier', '')
+        }
+        
+        # Add orgIdentifier and projectIdentifier if present
+        if org_identifier:
+            request_body['orgIdentifier'] = org_identifier
+        if project_identifier:
+            request_body['projectIdentifier'] = project_identifier
+        
+        # Use POST method
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created API key")
+            return True
+        else:
+            print(f"Failed to create API key: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -4165,6 +4449,164 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_service_accounts(self) -> Dict[str, Any]:
+        """Migrate service accounts at all scopes (account, org, project)
+        
+        Service accounts use /ng/api/serviceaccount endpoints.
+        Service accounts are always inline (not stored in GitX).
+        Service accounts should be migrated after roles and resource groups (service accounts reference them via role bindings).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Service Accounts ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing service accounts at {scope_label} ---")
+            
+            service_accounts = self.source_client.list_service_accounts(org_id, project_id)
+            
+            if not service_accounts:
+                print(f"  No service accounts found at {scope_label}")
+                continue
+            
+            print(f"  Found {len(service_accounts)} service accounts at {scope_label}")
+            
+            for service_account in service_accounts:
+                # The list_service_accounts method already extracts serviceAccount data and adds roleAssignmentMetadata
+                # So service_account here is the combined object with both serviceAccount fields and roleAssignmentMetadata
+                # We should use it directly, not extract serviceAccount again
+                identifier = service_account.get('identifier', '')
+                name = service_account.get('name', identifier)
+                
+                if not identifier:
+                    print(f"  Skipping service account without identifier")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing service account: {name} ({identifier}) at {scope_label}")
+                
+                # Service account data is already complete from list response with roleAssignmentMetadata
+                # The list_service_accounts method already normalizes roleAssignmentsMetadataDTO to roleAssignmentMetadata
+                full_service_account_data = service_account.copy()
+                
+                # Ensure roleAssignmentMetadata is set (it should already be set by list_service_accounts)
+                if 'roleAssignmentMetadata' not in full_service_account_data:
+                    # Fallback: try the original field name
+                    role_assignments = service_account.get('roleAssignmentsMetadataDTO', [])
+                    full_service_account_data['roleAssignmentMetadata'] = role_assignments
+                
+                # Debug: Print role assignments found
+                role_count = len(full_service_account_data.get('roleAssignmentMetadata', []))
+                if role_count > 0:
+                    print(f"  Found {role_count} role assignment(s) in service account data")
+                else:
+                    print(f"  Warning: No role assignments found in service account data")
+                
+                if not full_service_account_data:
+                    print(f"  Failed to get data for service account {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Service accounts are always inline
+                print(f"  Service account storage type: Inline")
+                
+                # Save exported data (as JSON, not YAML)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Export service account data as JSON
+                export_file = self.export_dir / f"service_account_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(full_service_account_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export service account data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create service account (Inline) with JSON data")
+                    role_count = len(full_service_account_data.get('roleAssignmentMetadata', []))
+                    if role_count > 0:
+                        print(f"  [DRY RUN] Would add {role_count} role binding(s) to service account")
+                    results['success'] += 1
+                else:
+                    # Step 1: Create service account (without role bindings)
+                    if not self.dest_client.create_service_account(
+                        service_account_data=full_service_account_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        results['failed'] += 1
+                        continue
+                    
+                    # Step 2: Add role bindings (if any)
+                    role_assignment_metadata = full_service_account_data.get('roleAssignmentMetadata', [])
+                    if role_assignment_metadata:
+                        # Extract role bindings from roleAssignmentMetadata
+                        role_bindings = []
+                        for role_assignment in role_assignment_metadata:
+                            role_binding = {
+                                'resourceGroupIdentifier': role_assignment.get('resourceGroupIdentifier', ''),
+                                'roleIdentifier': role_assignment.get('roleIdentifier', ''),
+                                'roleName': role_assignment.get('roleName', ''),
+                                'resourceGroupName': role_assignment.get('resourceGroupName', ''),
+                                'managedRole': role_assignment.get('managedRole', False)
+                            }
+                            # Only add non-empty role bindings
+                            if role_binding.get('roleIdentifier') and role_binding.get('resourceGroupIdentifier'):
+                                role_bindings.append(role_binding)
+                        
+                        if role_bindings:
+                            print(f"  Adding {len(role_bindings)} role binding(s) to service account")
+                            if not self.dest_client.add_role_bindings_to_service_account(
+                                service_account_identifier=identifier,
+                                role_bindings=role_bindings,
+                                org_identifier=org_id,
+                                project_identifier=project_id
+                            ):
+                                print(f"  Warning: Failed to add role bindings, but service account was created")
+                                # Don't fail the migration, just warn
+                        
+                        time.sleep(0.5)  # Rate limiting between role binding calls
+                    
+                    # Step 3: Migrate API keys (if any)
+                    api_keys = self.source_client.list_api_keys_for_service_account(
+                        service_account_identifier=identifier,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    )
+                    
+                    if api_keys:
+                        print(f"  Found {len(api_keys)} API key(s) for service account")
+                        for api_key in api_keys:
+                            api_key_identifier = api_key.get('identifier', '')
+                            api_key_name = api_key.get('name', api_key_identifier)
+                            
+                            print(f"    Processing API key: {api_key_name} ({api_key_identifier})")
+                            
+                            # Ensure parentIdentifier is set
+                            api_key['parentIdentifier'] = identifier
+                            
+                            if self.dry_run:
+                                print(f"    [DRY RUN] Would create API key for service account")
+                            else:
+                                if not self.dest_client.create_api_key_for_service_account(
+                                    api_key_data=api_key,
+                                    org_identifier=org_id,
+                                    project_identifier=project_id
+                                ):
+                                    print(f"    Warning: Failed to create API key {api_key_identifier}")
+                                time.sleep(0.5)  # Rate limiting between API key calls
+                    else:
+                        print(f"  No API keys found for service account")
+                    
+                    results['success'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -4823,6 +5265,10 @@ class HarnessMigrator:
         if 'users' in resource_types:
             all_results['users'] = self.migrate_users()
         
+        # Service accounts are migrated after roles and resource groups (service accounts reference them via role bindings)
+        if 'service-accounts' in resource_types:
+            all_results['service_accounts'] = self.migrate_service_accounts()
+        
         return all_results
 
 
@@ -4833,8 +5279,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

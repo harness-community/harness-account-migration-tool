@@ -25,6 +25,7 @@ This Python script migrates resources from one Harness account to another using 
   - Settings (account, organization, and project-level settings)
   - IP Allowlists (account-level IP allowlist configurations)
   - Users (Harness users with role bindings)
+  - Service Accounts (Harness service accounts with role bindings)
 - **Automatic Storage Detection**: Detects whether resources are stored inline or in GitX (Git Experience)
 - **Dual Migration Support**: 
   - Inline resources: Migrated using YAML content via import APIs
