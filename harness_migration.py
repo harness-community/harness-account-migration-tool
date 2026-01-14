@@ -1053,6 +1053,102 @@ class HarnessAPIClient:
             print(f"Failed to create webhook: {response.status_code} - {response.text}")
             return False
     
+    def list_policies(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None, module: str = 'cd') -> List[Dict]:
+        """List all policies with pagination support
+        
+        Uses GET /pm/api/v1/policies with per_page and page query parameters
+        Requires module parameter (e.g., 'cd')
+        Response: Direct array (not nested)
+        """
+        endpoint = "/pm/api/v1/policies"
+        params = {
+            'module': module,
+            'excludeRegoFromResponse': 'true',  # Exclude rego from list response for performance
+            'includePolicySetCount': 'true'
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use _fetch_paginated helper with GET method
+            # Pagination uses per_page and page (not size and page)
+            return self._fetch_paginated(
+                method='GET',
+                endpoint=endpoint,
+                params=params,
+                page_size=100,
+                page_param_name='page',
+                size_param_name='per_page',  # Policy API uses 'per_page' not 'size'
+                content_path='',  # Direct array response (not nested)
+                total_pages_path='',  # No total pages in response
+                pagination_in_body=False
+            )
+        except Exception as e:
+            print(f"Failed to list policies: {e}")
+            return []
+    
+    def get_policy_data(self, policy_identifier: str, org_identifier: Optional[str] = None,
+                       project_identifier: Optional[str] = None, module: str = 'cd') -> Optional[Dict]:
+        """Get policy data using GET endpoint
+        
+        Uses GET /pm/api/v1/policies/{identifier}
+        Requires module parameter (e.g., 'cd')
+        Response is a direct object (not nested under data)
+        """
+        endpoint = f"/pm/api/v1/policies/{policy_identifier}"
+        params = {
+            'module': module
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            # Response is a direct object (not nested under data)
+            policy_data = response.json()
+            return policy_data
+        else:
+            print(f"Failed to get policy data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_policy(self, policy_data: Dict, org_identifier: Optional[str] = None,
+                     project_identifier: Optional[str] = None, module: str = 'cd') -> bool:
+        """Create/upsert policy from policy data (for inline resources)
+        
+        Uses POST /pm/api/v1/policies endpoint
+        Requires: identifier, name, rego (not yaml)
+        Requires module parameter (e.g., 'cd')
+        """
+        endpoint = "/pm/api/v1/policies"
+        params = {
+            'module': module
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Build request body from policy data
+        # Use rego field (not yaml)
+        request_body = {
+            'identifier': policy_data.get('identifier'),
+            'name': policy_data.get('name'),
+            'rego': policy_data.get('rego', '')
+        }
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created policy")
+            return True
+        else:
+            print(f"Failed to create policy: {response.status_code} - {response.text}")
+            return False
     
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
@@ -2818,6 +2914,96 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_policies(self) -> Dict[str, Any]:
+        """Migrate policies at all scopes (account, org, project)
+        
+        Policies use /pm/api/v1/policies endpoints.
+        Policies stored in GitX are created as inline on the target account (GitX import not supported).
+        Policies use 'rego' field instead of 'yaml'.
+        Requires 'module' parameter (defaults to 'cd').
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Policies ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # Policies are module-specific, we'll use 'cd' as default module
+        # In the future, this could be extended to migrate policies for all modules
+        module = 'cd'
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing policies at {scope_label} (module: {module}) ---")
+            
+            policies = self.source_client.list_policies(org_id, project_id, module=module)
+            
+            for policy in policies:
+                # Policy data is directly in the list response (not nested)
+                identifier = policy.get('identifier', '')
+                name = policy.get('name', identifier)
+                
+                print(f"\nProcessing policy: {name} ({identifier}) at {scope_label}")
+                
+                # Get full policy data (with rego content)
+                policy_data = self.source_client.get_policy_data(
+                    identifier, org_id, project_id, module=module
+                )
+                
+                # If GET failed, try using data from list (but it won't have rego)
+                if not policy_data:
+                    policy_data = policy
+                
+                if not policy_data:
+                    print(f"  Failed to get data for policy {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Policies stored in GitX are created as inline on target (GitX import not supported)
+                # Check if it was GitX in source for informational purposes
+                is_gitx_source = self.source_client.is_gitx_resource(policy_data)
+                if is_gitx_source:
+                    print(f"  Policy was stored in GitX in source - will create as inline on target")
+                else:
+                    print(f"  Policy storage type: Inline")
+                
+                # Save exported data
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Get rego content (not yaml)
+                rego_content = policy_data.get('rego', '')
+                if not rego_content:
+                    print(f"  Warning: Policy {identifier} has no rego content")
+                    # Still try to migrate it, might be empty policy
+                
+                # Export policy rego content
+                export_file = self.export_dir / f"policy_{identifier}{scope_suffix}.rego"
+                try:
+                    export_file.write_text(rego_content)
+                    print(f"  Exported rego to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export policy rego: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create policy (Inline) with rego content")
+                    results['success'] += 1
+                else:
+                    # Always use create endpoint (GitX import not supported)
+                    # Create as inline even if it was GitX in source
+                    if self.dest_client.create_policy(
+                        policy_data=policy_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id,
+                        module=module
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -3448,6 +3634,10 @@ class HarnessMigrator:
         if 'webhooks' in resource_types:
             all_results['webhooks'] = self.migrate_webhooks()
         
+        # Policies are migrated last (they can reference other resources)
+        if 'policies' in resource_types:
+            all_results['policies'] = self.migrate_policies()
+        
         return all_results
 
 
@@ -3458,8 +3648,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

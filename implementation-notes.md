@@ -31,6 +31,7 @@ This file contains implementation-specific details, quirks, and special handling
 - Secrets: `item.get('secret', item)` (v2 API)
 - Input Sets: `item.get('inputSet', item)`
 - Webhooks: `item.get('webhook', item)`
+- Policies: `item.get('policy', item)`
 
 **Exceptions**:
 - **Templates**: May return flat objects (check response structure)
@@ -54,6 +55,7 @@ data.get('data', {}).get('resourceName', data.get('data', {}))
 - Triggers: Directly in `data` (not nested under `trigger`)
 - Overrides: Directly in `data` (not nested under `override`)
 - Webhooks: `data.webhook` (or directly in `data` if not nested)
+- Policies: `data.policy` (or directly in `data` if not nested)
 
 ## Field Name Variations
 
@@ -153,6 +155,22 @@ Different resources use different field names for YAML content:
 - **Get Response**: Direct object (not nested under `data` or `webhook` key)
 - **Field Names**: Uses `webhook_identifier` and `webhook_name` (not `identifier` and `name`)
 - **Spec Object**: Contains `webhook_type`, `connector_ref`, `repo_name`, `folder_paths` array
+
+### Policies
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Can be GitX or Inline in source, but always created as Inline on target (GitX import not supported)
+- **API Version**: Uses pm/api/v1 endpoints (not ng/api)
+- **Module**: Policies are module-specific (e.g., 'cd', 'ci', 'cf'). Default is 'cd'. Module must be specified in all API calls.
+- **Data Format**: Uses `rego` field (not `yaml`) - contains Rego policy code
+- Rego field: `rego` in get response (located directly in policy object)
+- List endpoint: `GET /pm/api/v1/policies` with `per_page` and `page` query parameters (not `size` and `page`)
+- List pagination: Uses `per_page` and `page` query parameters
+- Get endpoint: `GET /pm/api/v1/policies/{identifier}` with `module` query parameter (required)
+- Create endpoint: `POST /pm/api/v1/policies` with JSON body containing `identifier`, `name`, `rego` (not `yaml`)
+- **List Response**: Direct array (not nested) - access fields directly from list items
+- **Get Response**: Direct object (not nested under `data` or `policy` key)
+- **GitX Handling**: Policies stored in GitX in source are detected but created as inline on target (GitX import API not available)
+- **Export Format**: Policies are exported as `.rego` files (not `.yaml`)
 
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)
