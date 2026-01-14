@@ -90,6 +90,12 @@ class HarnessAPIClient:
                     response = requests.post(url, headers=request_headers, params=params, json=data)
             elif method.upper() == 'PUT':
                 response = requests.put(url, headers=request_headers, params=params, json=data if isinstance(data, dict) else None)
+            elif method.upper() == 'PATCH':
+                # If data is a string, send it as raw data; otherwise send as JSON
+                if isinstance(data, str):
+                    response = requests.patch(url, headers=request_headers, params=params, data=data)
+                else:
+                    response = requests.patch(url, headers=request_headers, params=params, json=data)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -1141,6 +1147,141 @@ class HarnessAPIClient:
             return True
         else:
             print(f"Failed to create policy: {response.status_code} - {response.text}")
+            return False
+    
+    def list_policy_sets(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all policy sets with pagination support
+        
+        Uses GET /pm/api/v1/policysets with per_page and page query parameters
+        Response: Direct array (not nested)
+        """
+        endpoint = "/pm/api/v1/policysets"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use _fetch_paginated helper with GET method
+            # Pagination uses per_page and page (not size and page)
+            return self._fetch_paginated(
+                method='GET',
+                endpoint=endpoint,
+                params=params,
+                page_size=100,
+                page_param_name='page',
+                size_param_name='per_page',  # Policy set API uses 'per_page' not 'size'
+                content_path='',  # Direct array response (not nested)
+                total_pages_path='',  # No total pages in response
+                pagination_in_body=False
+            )
+        except Exception as e:
+            print(f"Failed to list policy sets: {e}")
+            return []
+    
+    def get_policy_set_data(self, policy_set_identifier: str, org_identifier: Optional[str] = None,
+                           project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get policy set data using GET endpoint
+        
+        Uses GET /pm/api/v1/policysets/{identifier}
+        Response is a direct object (not nested under data)
+        """
+        endpoint = f"/pm/api/v1/policysets/{policy_set_identifier}"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            # Response is a direct object (not nested under data)
+            policy_set_data = response.json()
+            return policy_set_data
+        else:
+            print(f"Failed to get policy set data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_policy_set(self, policy_set_data: Dict, org_identifier: Optional[str] = None,
+                         project_identifier: Optional[str] = None) -> bool:
+        """Create/upsert policy set from policy set data
+        
+        Uses POST /pm/api/v1/policysets endpoint
+        Requires: identifier, name, type, action, description, enabled, policies (array of policy references)
+        """
+        identifier = policy_set_data.get('identifier')
+        if not identifier:
+            print("Policy set identifier is required")
+            return False
+        
+        endpoint = "/pm/api/v1/policysets"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # Transform policies array: extract only identifier and severity, and scope identifiers properly
+        policies_list = policy_set_data.get('policies', [])
+        transformed_policies = []
+        for policy in policies_list:
+            # Policy can be a dict with full policy data or just identifier/severity
+            policy_identifier = policy.get('identifier', '')
+            severity = policy.get('severity', '')
+            
+            if not policy_identifier:
+                continue
+            
+            # Check if identifier is already scoped (starts with "account." or "org.")
+            if policy_identifier.startswith('account.') or policy_identifier.startswith('org.'):
+                # Already scoped, use as-is
+                scoped_identifier = policy_identifier
+            else:
+                # Scope the policy identifier based on where the policy is located
+                # Check if policy has account_id, org_id, project_id to determine scope
+                policy_org_id = policy.get('org_id', '')
+                policy_project_id = policy.get('project_id', '')
+                
+                # If policy has no org_id and no project_id, it's account level
+                if not policy_org_id and not policy_project_id:
+                    scoped_identifier = f"account.{policy_identifier}"
+                # If policy has org_id but no project_id, it's org level
+                elif policy_org_id and not policy_project_id:
+                    scoped_identifier = f"org.{policy_identifier}"
+                # Otherwise, it's project level (just use the identifier as-is)
+                else:
+                    scoped_identifier = policy_identifier
+            
+            transformed_policies.append({
+                'identifier': scoped_identifier,
+                'severity': severity
+            })
+        
+        # Build request body from policy set data
+        # Do not include 'id' field - it's not in the API
+        request_body = {
+            'identifier': identifier,
+            'name': policy_set_data.get('name', identifier),
+            'type': policy_set_data.get('type', ''),
+            'action': policy_set_data.get('action', ''),
+            'description': policy_set_data.get('description', ''),
+            'enabled': policy_set_data.get('enabled', False)
+        }
+        
+        # Include policies if present
+        if transformed_policies:
+            request_body['policies'] = transformed_policies
+        
+        # Use POST method (not PATCH)
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created policy set")
+            return True
+        else:
+            print(f"Failed to create policy set: {response.status_code} - {response.text}")
             return False
     
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -3008,6 +3149,78 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_policy_sets(self) -> Dict[str, Any]:
+        """Migrate policy sets at all scopes (account, org, project)
+        
+        Policy sets use /pm/api/v1/policysets endpoints.
+        Policy sets reference policies, so policies must be migrated first.
+        Policy sets are always inline (not stored in GitX).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Policy Sets ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing policy sets at {scope_label} ---")
+            
+            policy_sets = self.source_client.list_policy_sets(org_id, project_id)
+            
+            for policy_set in policy_sets:
+                # Policy set data is directly in the list response (not nested)
+                identifier = policy_set.get('identifier', '')
+                name = policy_set.get('name', identifier)
+                
+                print(f"\nProcessing policy set: {name} ({identifier}) at {scope_label}")
+                
+                # Get full policy set data
+                policy_set_data = self.source_client.get_policy_set_data(
+                    identifier, org_id, project_id
+                )
+                
+                # If GET failed, try using data from list
+                if not policy_set_data:
+                    policy_set_data = policy_set
+                
+                if not policy_set_data:
+                    print(f"  Failed to get data for policy set {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Policy sets are always inline
+                print(f"  Policy set storage type: Inline")
+                
+                # Save exported data (as JSON, not YAML)
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                # Export policy set data as JSON
+                export_file = self.export_dir / f"policy_set_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(policy_set_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export policy set data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create policy set (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    # Use create endpoint with policy set data
+                    if self.dest_client.create_policy_set(
+                        policy_set_data=policy_set_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -3638,9 +3851,13 @@ class HarnessMigrator:
         if 'webhooks' in resource_types:
             all_results['webhooks'] = self.migrate_webhooks()
         
-        # Policies are migrated last (they can reference other resources)
+        # Policies are migrated before policy sets (policy sets reference policies)
         if 'policies' in resource_types:
             all_results['policies'] = self.migrate_policies()
+        
+        # Policy sets are migrated after policies (they reference policies)
+        if 'policy-sets' in resource_types:
+            all_results['policy_sets'] = self.migrate_policy_sets()
         
         return all_results
 
@@ -3652,8 +3869,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')

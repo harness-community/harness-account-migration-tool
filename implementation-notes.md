@@ -32,6 +32,7 @@ This file contains implementation-specific details, quirks, and special handling
 - Input Sets: `item.get('inputSet', item)`
 - Webhooks: `item.get('webhook', item)`
 - Policies: `item.get('policy', item)`
+- Policy Sets: `item.get('policySet', item)` (or directly in list if not nested)
 
 **Exceptions**:
 - **Templates**: May return flat objects (check response structure)
@@ -170,6 +171,20 @@ Different resources use different field names for YAML content:
 - **Get Response**: Direct object (not nested under `data` or `policy` key)
 - **GitX Handling**: Policies stored in GitX in source are detected but created as inline on target (GitX import API not available)
 - **Export Format**: Policies are exported as `.rego` files (not `.yaml`)
+
+### Policy Sets
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses pm/api/v1 endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with `policies` array (not YAML)
+- List endpoint: `GET /pm/api/v1/policysets` with `per_page` and `page` query parameters (not `size` and `page`)
+- List pagination: Uses `per_page` and `page` query parameters
+- Get endpoint: `GET /pm/api/v1/policysets/{identifier}`
+- Create endpoint: `POST /pm/api/v1/policysets` with JSON body containing `identifier`, `name`, `type`, `action`, `description`, `enabled`, optional `policies` array (not PATCH, no identifier in URL path, no `id` field)
+- **List Response**: Direct array (not nested) - access fields directly from list items
+- **Get Response**: Direct object (not nested under `data` or `policySet` key)
+- **Export Format**: Policy sets are exported as `.json` files (not `.yaml`)
+- **Dependencies**: Policy sets reference policies, so policies must be migrated first
 
 ### Templates
 - **Storage Method**: Can be GitX or Inline (varies by template and account configuration)

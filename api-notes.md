@@ -118,6 +118,22 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Request body: JSON with `identifier`, `name`, `rego` (Rego policy code)
   - **Note**: GitX import not supported - policies stored in GitX in source are created as inline on target
 
+### Policy Sets
+- **Scope**: Account, Organization, and Project levels
+- **Storage Method**: Always Inline (NOT stored in GitX)
+- **API Version**: Uses pm/api/v1 endpoints (not ng/api)
+- **Data Format**: Uses JSON structure with `policies` array (not YAML)
+- `GET /pm/api/v1/policysets` - List policy sets
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `per_page`, `page`
+  - Response: Direct array of policy set objects (not nested)
+- `GET /pm/api/v1/policysets/{identifier}` - Get policy set data
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Response: Direct policy set object with `identifier`, `name`, `policies` array, etc. (not nested under `data`)
+- `POST /pm/api/v1/policysets` - Create/upsert policy set
+  - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+  - Request body: JSON with `identifier`, `name`, `type`, `action`, `description`, `enabled`, optional `policies` (array of policy references with `identifier` and `severity`)
+  - **Note**: Policy sets reference policies, so policies must be migrated first. Uses POST method (not PATCH), identifier in request body (not URL path).
+
 ### Pipelines
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines
