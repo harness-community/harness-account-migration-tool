@@ -725,6 +725,203 @@ class HarnessAPIClient:
             print(f"Failed to import service from GitX: {response.status_code} - {response.text}")
             return False
     
+    def list_overrides(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all overrides with pagination support
+        
+        Uses POST /ng/api/serviceOverrides/v2/list endpoint with null body
+        Response structure: data.content array with override objects directly (not nested)
+        """
+        endpoint = "/ng/api/serviceOverrides/v2/list"
+        params = {
+            'routingId': self.account_id
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        all_items = []
+        page = 0
+        page_size = 100
+        
+        while True:
+            params['page'] = page
+            params['size'] = page_size
+            
+            # POST request with null body
+            response = self._make_request('POST', endpoint, params=params, data=None)
+            
+            if response.status_code != 200:
+                print(f"Failed to fetch overrides page {page}: {response.status_code} - {response.text}")
+                break
+            
+            response_data = response.json()
+            
+            # Extract content from response - overrides are in data.content
+            content = response_data.get('data', {}).get('content', [])
+            if not isinstance(content, list):
+                content = []
+            
+            all_items.extend(content)
+            
+            # Check pagination metadata
+            total_pages = response_data.get('data', {}).get('totalPages')
+            if total_pages is not None:
+                if page >= total_pages - 1:
+                    break
+            elif len(content) < page_size:
+                # If we got fewer items than page_size, we're done
+                break
+            
+            # Continue to next page
+            page += 1
+            
+            # Safety limit
+            if page > 10000:
+                print(f"Warning: Reached pagination limit at page {page}")
+                break
+        
+        return all_items
+    
+    def get_override_data(self, override_identifier: str, org_identifier: Optional[str] = None,
+                         project_identifier: Optional[str] = None, 
+                         repo_name: Optional[str] = None, load_from_fallback_branch: bool = False) -> Optional[Dict]:
+        """Get override data using GET endpoint
+        
+        Uses GET /ng/api/serviceOverrides/{identifier}
+        For GitX overrides, requires repoName and loadFromFallbackBranch parameters
+        """
+        endpoint = f"/ng/api/serviceOverrides/{override_identifier}"
+        params = {}
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        # For GitX overrides, add repoName and loadFromFallbackBranch
+        if repo_name:
+            params['repoName'] = repo_name
+            params['loadFromFallbackBranch'] = 'true' if load_from_fallback_branch else 'false'
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Override data is in data.data (not nested under 'override' key)
+            override_data = data.get('data', {})
+            return override_data
+        else:
+            print(f"Failed to get override data: {response.status_code} - {response.text}")
+            return None
+    
+    def get_override_yaml(self, override_identifier: str, org_identifier: Optional[str] = None,
+                          project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get override YAML"""
+        override_data = self.get_override_data(override_identifier, org_identifier, project_identifier)
+        if override_data:
+            return override_data.get('yaml', '')
+        return None
+    
+    def create_override(self, override_data: Dict, org_identifier: Optional[str] = None,
+                       project_identifier: Optional[str] = None) -> bool:
+        """Create/upsert override from override data (for inline resources)
+        
+        Uses POST /ng/api/serviceOverrides/upsert endpoint
+        Requires: type, environmentRef, infraIdentifier (if applicable), identifier, spec, yaml
+        """
+        endpoint = "/ng/api/serviceOverrides/upsert"
+        params = {
+            'routingId': self.account_id
+        }
+        
+        # Build request body from override data
+        # Required fields: type, environmentRef, identifier, spec, yaml
+        # Optional: infraIdentifier, serviceRef
+        request_body = {
+            'type': override_data.get('type'),
+            'environmentRef': override_data.get('environmentRef'),
+            'identifier': override_data.get('identifier'),
+            'spec': override_data.get('spec', {}),
+            'yaml': override_data.get('yaml', '')
+        }
+        
+        # Add optional fields if present
+        if 'infraIdentifier' in override_data:
+            request_body['infraIdentifier'] = override_data['infraIdentifier']
+        if 'serviceRef' in override_data:
+            request_body['serviceRef'] = override_data['serviceRef']
+        
+        # Add scope identifiers
+        if org_identifier:
+            request_body['orgIdentifier'] = org_identifier
+        if project_identifier:
+            request_body['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully created/upserted override")
+            return True
+        else:
+            print(f"Failed to create override: {response.status_code} - {response.text}")
+            return False
+    
+    def import_override_yaml(self, override_data: Dict, git_details: Dict,
+                            org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
+        """Import override from Git location (for GitX resources only)
+        
+        Uses POST /ng/api/serviceOverrides/import endpoint
+        Query parameters: accountIdentifier, connectorRef, isHarnessCodeRepo, repoName, branch, filePath
+        JSON body: type, environmentRef, serviceRef (if applicable), infraIdentifier (if applicable), orgIdentifier, projectIdentifier
+        """
+        endpoint = "/ng/api/serviceOverrides/import"
+        params = {}
+        
+        # Add connector reference (required for GitX import)
+        connector_ref = git_details.get('connectorRef')
+        if not connector_ref:
+            print(f"Failed to import override: connectorRef is required for GitX imports")
+            return False
+        params['connectorRef'] = connector_ref
+        
+        # Add isHarnessCodeRepo (defaults to false if not specified)
+        params['isHarnessCodeRepo'] = git_details.get('isHarnessCodeRepo', 'false')
+        
+        # Add git details fields to query parameters
+        if 'repoName' in git_details:
+            params['repoName'] = git_details['repoName']
+        if 'branch' in git_details:
+            params['branch'] = git_details['branch']
+        if 'filePath' in git_details:
+            params['filePath'] = git_details['filePath']
+        
+        # Build request body with override metadata (not spec or yaml)
+        request_body = {
+            'type': override_data.get('type'),
+            'environmentRef': override_data.get('environmentRef')
+        }
+        
+        # Add optional fields if present
+        if 'infraIdentifier' in override_data:
+            request_body['infraIdentifier'] = override_data['infraIdentifier']
+        if 'serviceRef' in override_data:
+            request_body['serviceRef'] = override_data['serviceRef']
+        
+        # Add scope identifiers
+        if org_identifier:
+            request_body['orgIdentifier'] = org_identifier
+        if project_identifier:
+            request_body['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
+        
+        if response.status_code in [200, 201]:
+            print(f"Successfully imported override from GitX")
+            return True
+        else:
+            print(f"Failed to import override from GitX: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -2273,6 +2470,147 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_overrides(self) -> Dict[str, Any]:
+        """Migrate overrides at all scopes (account, org, project)
+        
+        Overrides are always inline (not stored in GitX).
+        Uses /ng/api/serviceOverrides/v2/list for listing and /ng/api/serviceOverrides/upsert for creation.
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} Overrides ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        scopes = self._get_all_scopes()
+        for org_id, project_id in scopes:
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            print(f"\n--- Processing overrides at {scope_label} ---")
+            
+            overrides = self.source_client.list_overrides(org_id, project_id)
+            
+            for override in overrides:
+                # Overrides in list response are directly in the items (not nested under "override" key)
+                identifier = override.get('identifier', '')
+                override_type = override.get('type', 'Unknown')
+                environment_ref = override.get('environmentRef', '')
+                
+                # Build a display name from available fields
+                name = f"{override_type}"
+                if environment_ref:
+                    name += f" for {environment_ref}"
+                if identifier:
+                    name += f" ({identifier})"
+                
+                print(f"\nProcessing override: {name} at {scope_label}")
+                
+                # Get full override data to detect storage type
+                # First try without repoName (works for inline overrides)
+                # For GitX overrides, the GET might still return entityGitInfo even without repoName
+                override_data = self.source_client.get_override_data(
+                    identifier, org_id, project_id
+                )
+                
+                # If GET succeeded and we got entityGitInfo, it's GitX - re-fetch with repoName for complete data
+                if override_data and override_data.get('entityGitInfo'):
+                    entity_git_info = override_data.get('entityGitInfo', {})
+                    repo_name = entity_git_info.get('repoName')
+                    if repo_name:
+                        # Re-fetch with repoName to get complete GitX data
+                        override_data = self.source_client.get_override_data(
+                            identifier, org_id, project_id,
+                            repo_name=repo_name,
+                            load_from_fallback_branch=True
+                        )
+                
+                # If GET failed, try using data from list (might be incomplete for GitX)
+                if not override_data:
+                    override_data = override
+                
+                if not override_data:
+                    print(f"  Failed to get data for override {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # Detect if override is GitX or Inline
+                is_gitx = self.source_client.is_gitx_resource(override_data)
+                storage_type = "GitX" if is_gitx else "Inline"
+                print(f"  Override storage type: {storage_type}")
+                
+                # Save exported data
+                scope_suffix = f"_account" if not org_id else (f"_org_{org_id}" if not project_id else f"_org_{org_id}_project_{project_id}")
+                
+                yaml_content = None
+                git_details = None
+                
+                if is_gitx:
+                    # GitX: Get git details from entityGitInfo
+                    entity_git_info = override_data.get('entityGitInfo', {})
+                    if not entity_git_info:
+                        print(f"  Failed to get entityGitInfo for GitX override {identifier}")
+                        results['failed'] += 1
+                        continue
+                    
+                    # Extract git details from entityGitInfo
+                    git_details = {
+                        'repoName': entity_git_info.get('repoName'),
+                        'branch': entity_git_info.get('branch'),
+                        'filePath': entity_git_info.get('filePath')
+                    }
+                    
+                    # Get connector reference
+                    connector_ref = override_data.get('connectorRef')
+                    if connector_ref:
+                        git_details['connectorRef'] = connector_ref
+                    
+                    # Also get YAML for export
+                    yaml_content = override_data.get('yaml', '')
+                    export_file = self.export_dir / f"override_{identifier}{scope_suffix}.yaml"
+                    if yaml_content:
+                        export_file.write_text(yaml_content)
+                        print(f"  Exported YAML to {export_file}")
+                else:
+                    # Inline: Get YAML content
+                    yaml_content = override_data.get('yaml', '')
+                    if not yaml_content:
+                        print(f"  Failed to get YAML for inline override {identifier}")
+                        results['failed'] += 1
+                        continue
+                    export_file = self.export_dir / f"override_{identifier}{scope_suffix}.yaml"
+                    export_file.write_text(yaml_content)
+                    print(f"  Exported YAML to {export_file}")
+                
+                # Import to destination (skip in dry-run mode)
+                if self.dry_run:
+                    if is_gitx:
+                        print(f"  [DRY RUN] Would import override (GitX) from git location")
+                    else:
+                        print(f"  [DRY RUN] Would create override (Inline) with YAML content")
+                    results['success'] += 1
+                else:
+                    if is_gitx:
+                        # GitX: Use import endpoint with git details and override data
+                        if self.dest_client.import_override_yaml(
+                            override_data=override_data,
+                            git_details=git_details,
+                            org_identifier=org_id, project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
+                    else:
+                        # Inline: Use create endpoint with override data
+                        if self.dest_client.create_override(
+                            override_data=override_data,
+                            org_identifier=org_id,
+                            project_identifier=project_id
+                        ):
+                            results['success'] += 1
+                        else:
+                            results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
@@ -2832,7 +3170,7 @@ class HarnessMigrator:
     def migrate_all(self, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Migrate all resources"""
         if resource_types is None:
-            resource_types = ['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'templates', 'pipelines', 'input-sets', 'triggers']
+            resource_types = ['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'templates', 'pipelines', 'input-sets', 'triggers']
         
         all_results = {}
         
@@ -2880,6 +3218,10 @@ class HarnessMigrator:
         if 'services' in resource_types:
             all_results['services'] = self.migrate_services()
         
+        # Overrides must be migrated after environments, infrastructures, and services
+        if 'overrides' in resource_types:
+            all_results['overrides'] = self.migrate_overrides()
+        
         # Other templates (Pipeline, Stage, Step, MonitoredService, and others) - migrated before pipelines
         if 'templates' in resource_types:
             all_results['templates'] = self.migrate_templates()
@@ -2905,8 +3247,8 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates', 'input-sets', 'triggers'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'pipelines', 'templates', 'input-sets', 'triggers'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'pipelines', 'templates', 'input-sets', 'triggers'],
                        help='Resource types to migrate')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
                        help='Harness API base URL')
