@@ -2766,37 +2766,31 @@ class HarnessAPIClient:
         
         # Connectors are created by passing YAML directly in the request body
         # The Content-Type should be text/yaml or application/yaml
-        headers = self.headers.copy()
-        headers['Content-Type'] = 'text/yaml'
+        headers = {
+            'Content-Type': 'text/yaml'
+        }
         
-        url = f"{self.base_url}{endpoint}"
-        params['accountIdentifier'] = self.account_id
+        response = self._make_request('POST', endpoint, params=params, data=yaml_content, headers=headers)
         
-        try:
-            response = requests.post(url, headers=headers, params=params, data=yaml_content)
+        if response.status_code in [200, 201]:
+            print(f"Successfully created connector")
+            return True
+        else:
+            # Extract identifier from YAML for error messages
+            identifier = 'unknown'
+            try:
+                import yaml
+                parsed_yaml = yaml.safe_load(yaml_content)
+                if parsed_yaml and isinstance(parsed_yaml, dict):
+                    identifier = parsed_yaml.get('connector', {}).get('identifier', 'unknown')
+            except:
+                pass
             
-            if response.status_code in [200, 201]:
-                print(f"Successfully created connector")
-                return True
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('connector', identifier, response.text, scope_info)}")
             else:
-                # Extract identifier from YAML for error messages
-                identifier = 'unknown'
-                try:
-                    import yaml
-                    parsed_yaml = yaml.safe_load(yaml_content)
-                    if parsed_yaml and isinstance(parsed_yaml, dict):
-                        identifier = parsed_yaml.get('connector', {}).get('identifier', 'unknown')
-                except:
-                    pass
-                
-                if is_resource_already_exists_error(response.status_code, response.text):
-                    scope_info = get_scope_info(org_identifier, project_identifier)
-                    print(f"  {format_resource_already_exists_message('connector', identifier, response.text, scope_info)}")
-                else:
-                    print(f"Failed to create connector: {response.status_code} - {response.text}")
-                return False
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: {e}")
+                print(f"Failed to create connector: {response.status_code} - {response.text}")
             return False
     
     def list_infrastructures(self, environment_identifier: str, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -3169,27 +3163,21 @@ class HarnessAPIClient:
         
         # Templates are created by passing YAML directly in the request body
         # The Content-Type should be application/yaml
-        headers = self.headers.copy()
-        headers['Content-Type'] = 'application/yaml'
+        headers = {
+            'Content-Type': 'application/yaml'
+        }
         
-        url = f"{self.base_url}{endpoint}"
-        params['accountIdentifier'] = self.account_id
+        response = self._make_request('POST', endpoint, params=params, data=yaml_content, headers=headers)
         
-        try:
-            response = requests.post(url, headers=headers, params=params, data=yaml_content)
-            
-            if response.status_code in [200, 201]:
-                print(f"Successfully created template version {version}")
-                return True
+        if response.status_code in [200, 201]:
+            print(f"Successfully created template version {version}")
+            return True
+        else:
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message(f'template version {version}', identifier, response.text, scope_info)}")
             else:
-                if is_resource_already_exists_error(response.status_code, response.text):
-                    scope_info = get_scope_info(org_identifier, project_identifier)
-                    print(f"  {format_resource_already_exists_message(f'template version {version}', identifier, response.text, scope_info)}")
-                else:
-                    print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
-                return False
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: {e}")
+                print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
             return False
     
     def import_template_yaml(self, git_details: Dict, template_identifier: str, version: str,
