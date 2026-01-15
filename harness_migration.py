@@ -2392,6 +2392,199 @@ class HarnessAPIClient:
             print(f"Failed to update monitored service: {response.status_code} - {response.text}")
             return False
     
+    # SLO Notification Rules (SRM)
+    def list_slo_notification_rules(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all SLO notification rules with pagination support
+        
+        Uses GET /cv/api/notification-rule endpoint
+        """
+        endpoint = "/cv/api/notification-rule"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use _fetch_paginated helper
+            # Pagination uses pageNumber and pageSize
+            return self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='pageNumber',
+                size_param_name='pageSize',
+                content_path='data.content',
+                page_size=100
+            )
+        except Exception as e:
+            print(f"Failed to list SLO notification rules: {e}")
+            return []
+    
+    def get_slo_notification_rule_data(self, identifier: str, org_identifier: Optional[str] = None,
+                                       project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get SLO notification rule data
+        
+        Uses GET /cv/api/notification-rule with notificationRuleIdentifiers parameter
+        """
+        endpoint = "/cv/api/notification-rule"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id,
+            'notificationRuleIdentifiers': identifier,
+            'pageNumber': 0,
+            'pageSize': 10
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            content = data.get('data', {}).get('content', [])
+            if content:
+                return content[0]  # Return first matching rule
+            return None
+        else:
+            print(f"Failed to get SLO notification rule data: {response.status_code} - {response.text}")
+            return None
+    
+    def create_slo_notification_rule(self, notification_rule_data: Dict, org_identifier: Optional[str] = None,
+                                     project_identifier: Optional[str] = None) -> bool:
+        """Create SLO notification rule
+        
+        Uses POST /cv/api/notification-rule endpoint
+        """
+        endpoint = "/cv/api/notification-rule"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id
+        }
+        
+        # Extract from notificationRule wrapper if present (GET returns wrapped, POST expects unwrapped)
+        data_to_create = notification_rule_data.copy()
+        if 'notificationRule' in data_to_create and isinstance(data_to_create.get('notificationRule'), dict):
+            data_to_create = data_to_create['notificationRule']
+        
+        # Clean data for creation
+        cleaned_data = remove_none_values(clean_for_creation(data_to_create))
+        
+        # Ensure org and project identifiers are set
+        if org_identifier:
+            cleaned_data['orgIdentifier'] = org_identifier
+        if project_identifier:
+            cleaned_data['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=cleaned_data)
+        
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            identifier = cleaned_data.get('identifier', 'unknown')
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('SLO notification rule', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create SLO notification rule: {response.status_code} - {response.text}")
+            return False
+    
+    # SLOs (Service Level Objectives - SRM)
+    def list_slos(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
+        """List all SLOs with pagination support
+        
+        Uses GET /cv/api/slo-dashboard/widgets/list endpoint
+        """
+        endpoint = "/cv/api/slo-dashboard/widgets/list"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        try:
+            # Use _fetch_paginated helper
+            # Pagination uses pageNumber and pageSize
+            return self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='pageNumber',
+                size_param_name='pageSize',
+                content_path='data.content',
+                page_size=100
+            )
+        except Exception as e:
+            print(f"Failed to list SLOs: {e}")
+            return []
+    
+    def get_slo_data(self, identifier: str, org_identifier: Optional[str] = None,
+                     project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """Get SLO data
+        
+        Uses GET /cv/api/slo/v2/{identifier} endpoint
+        Response structure: {"resource": {"serviceLevelObjectiveV2": {...}}}
+        """
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        endpoint = f"/cv/api/slo/v2/{identifier}"
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Extract from resource.serviceLevelObjectiveV2
+            slo_data = data.get('resource', {}).get('serviceLevelObjectiveV2', {})
+            if slo_data and slo_data.get('identifier'):
+                return slo_data
+        
+        print(f"  Failed to get SLO data: {response.status_code} - {response.text[:300] if response.text else 'no response'}")
+        return None
+    
+    def create_slo(self, slo_data: Dict, org_identifier: Optional[str] = None,
+                   project_identifier: Optional[str] = None) -> bool:
+        """Create SLO
+        
+        Uses POST /cv/api/slo/v2 endpoint
+        """
+        endpoint = "/cv/api/slo/v2"
+        params = {
+            'routingId': self.account_id,
+            'accountId': self.account_id
+        }
+        
+        # Clean data for creation
+        cleaned_data = remove_none_values(clean_for_creation(slo_data.copy()))
+        
+        # Ensure org and project identifiers are set
+        if org_identifier:
+            cleaned_data['orgIdentifier'] = org_identifier
+        if project_identifier:
+            cleaned_data['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('POST', endpoint, params=params, data=cleaned_data)
+        
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            identifier = cleaned_data.get('identifier', 'unknown')
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('SLO', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create SLO: {response.status_code} - {response.text}")
+            return False
+    
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
         endpoint = "/ng/api/environmentsV2"
@@ -4281,6 +4474,178 @@ class HarnessMigrator:
         
         return results
     
+    def migrate_slo_notification_rules(self) -> Dict[str, Any]:
+        """Migrate SLO notification rules at project level
+        
+        SLO notification rules are referenced by SLOs, so they must be migrated before SLOs.
+        Notification rules are always inline (not stored in GitX).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} SLO Notification Rules ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # SLO notification rules are project-level only
+        scopes = self._get_project_scopes()
+        for org_id, project_id in scopes:
+            scope_label = f"project {project_id} (org {org_id})"
+            print(f"\n--- Processing SLO notification rules at {scope_label} ---")
+            
+            notification_rules = self.source_client.list_slo_notification_rules(org_id, project_id)
+            
+            if not notification_rules:
+                print(f"  No SLO notification rules found at {scope_label}")
+                continue
+            
+            print(f"  Found {len(notification_rules)} SLO notification rule(s) at {scope_label}")
+            
+            for notification_rule in notification_rules:
+                # Extract notification rule data (may be nested or direct)
+                nr_data = notification_rule.get('notificationRule', notification_rule) if isinstance(notification_rule, dict) and 'notificationRule' in notification_rule else notification_rule
+                identifier = nr_data.get('identifier', '')
+                name = nr_data.get('name', identifier)
+                
+                if not identifier:
+                    print(f"  Skipping SLO notification rule without identifier")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing SLO notification rule: {name} ({identifier}) at {scope_label}")
+                
+                # Get full notification rule data
+                full_nr_data = self.source_client.get_slo_notification_rule_data(identifier, org_id, project_id)
+                if not full_nr_data:
+                    # Fall back to list data if get fails
+                    full_nr_data = nr_data
+                
+                # SLO notification rules are always inline
+                print(f"  SLO notification rule storage type: Inline")
+                
+                # Save exported data (as JSON)
+                scope_suffix = f"_org_{org_id}_project_{project_id}"
+                export_file = self.export_dir / f"slo_notification_rule_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(full_nr_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export SLO notification rule data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create SLO notification rule (Inline) with JSON data")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_slo_notification_rule(
+                        notification_rule_data=full_nr_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        print(f"  Successfully created SLO notification rule")
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
+    def migrate_slos(self) -> Dict[str, Any]:
+        """Migrate SLOs at project level
+        
+        SLOs reference monitored services and notification rules.
+        Must be migrated after monitored services and SLO notification rules.
+        SLOs are always inline (not stored in GitX).
+        """
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} SLOs ===")
+        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        
+        # SLOs are project-level only
+        scopes = self._get_project_scopes()
+        for org_id, project_id in scopes:
+            scope_label = f"project {project_id} (org {org_id})"
+            print(f"\n--- Processing SLOs at {scope_label} ---")
+            
+            slos = self.source_client.list_slos(org_id, project_id)
+            
+            if not slos:
+                print(f"  No SLOs found at {scope_label}")
+                continue
+            
+            print(f"  Found {len(slos)} SLO(s) at {scope_label}")
+            
+            for slo in slos:
+                # Extract SLO identifier from list response
+                identifier = slo.get('sloIdentifier', slo.get('identifier', ''))
+                name = slo.get('name', identifier)
+                
+                if not identifier:
+                    print(f"  Skipping SLO without identifier")
+                    results['skipped'] += 1
+                    continue
+                
+                print(f"\nProcessing SLO: {name} ({identifier}) at {scope_label}")
+                
+                # Get full SLO data from v2 endpoint
+                full_slo_data = self.source_client.get_slo_data(identifier, org_id, project_id)
+                if not full_slo_data:
+                    print(f"  Failed to get data for SLO {identifier}")
+                    results['failed'] += 1
+                    continue
+                
+                # SLOs are always inline
+                print(f"  SLO storage type: Inline")
+                
+                # Log key SLO details
+                slo_type = full_slo_data.get('type', 'Unknown')
+                target_type = full_slo_data.get('sloTarget', {}).get('type', 'Unknown')
+                target_pct = full_slo_data.get('sloTarget', {}).get('sloTargetPercentage', 'N/A')
+                monitored_svc = full_slo_data.get('spec', {}).get('monitoredServiceRef', 'Unknown')
+                health_src = full_slo_data.get('spec', {}).get('healthSourceRef', 'Unknown')
+                sli_config = full_slo_data.get('spec', {}).get('serviceLevelIndicators', [])
+                sli_type = sli_config[0].get('type', 'Unknown') if sli_config else 'Unknown'
+                user_journeys = full_slo_data.get('userJourneyRefs', [])
+                
+                print(f"  SLO Type: {slo_type}, Target: {target_type} ({target_pct}%)")
+                print(f"  Monitored Service: {monitored_svc}, Health Source: {health_src}")
+                print(f"  SLI Type: {sli_type}")
+                if user_journeys:
+                    print(f"  User Journey Refs: {user_journeys}")
+                
+                # Check for notification rule references
+                notification_rule_refs = full_slo_data.get('notificationRuleRefs', [])
+                if notification_rule_refs:
+                    print(f"  Found {len(notification_rule_refs)} notification rule reference(s) in SLO")
+                
+                # Save exported data (as JSON)
+                scope_suffix = f"_org_{org_id}_project_{project_id}"
+                export_file = self.export_dir / f"slo_{identifier}{scope_suffix}.json"
+                try:
+                    export_file.write_text(json.dumps(full_slo_data, indent=2))
+                    print(f"  Exported JSON to {export_file}")
+                except Exception as e:
+                    print(f"  Failed to export SLO data: {e}")
+                
+                # Migrate to destination (skip in dry-run mode)
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create SLO (Inline) with JSON data")
+                    if notification_rule_refs:
+                        print(f"  [DRY RUN] SLO references {len(notification_rule_refs)} notification rule(s)")
+                    results['success'] += 1
+                else:
+                    if self.dest_client.create_slo(
+                        slo_data=full_slo_data,
+                        org_identifier=org_id,
+                        project_identifier=project_id
+                    ):
+                        print(f"  Successfully created SLO")
+                        results['success'] += 1
+                    else:
+                        results['failed'] += 1
+                
+                time.sleep(0.5)  # Rate limiting
+        
+        return results
+    
     def migrate_webhooks(self) -> Dict[str, Any]:
         """Migrate webhooks at all scopes (account, org, project)
         
@@ -5718,6 +6083,14 @@ class HarnessMigrator:
         if 'user-journeys' in resource_types:
             all_results['user_journeys'] = self.migrate_user_journeys()
         
+        # SLO notification rules must be migrated before SLOs (SLOs reference notification rules)
+        if 'slo-notification-rules' in resource_types:
+            all_results['slo_notification_rules'] = self.migrate_slo_notification_rules()
+        
+        # SLOs must be migrated after monitored services and SLO notification rules
+        if 'slos' in resource_types:
+            all_results['slos'] = self.migrate_slos()
+        
         # Other templates (Pipeline, Stage, Step, MonitoredService, and others) - migrated before pipelines
         if 'templates' in resource_types:
             all_results['templates'] = self.migrate_templates()
@@ -5779,11 +6152,11 @@ def main():
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
     parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        help='Resource types to migrate')
     parser.add_argument('--exclude-resource-types', nargs='+',
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
                        default=[],
                        help='Resource types to exclude from migration (takes precedence over --resource-types)')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
