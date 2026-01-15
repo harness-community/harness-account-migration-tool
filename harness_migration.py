@@ -159,7 +159,8 @@ class HarnessAPIClient:
                         page_param_name: str = 'page', size_param_name: str = 'size',
                         content_path: str = 'data.content', total_pages_path: str = 'data.totalPages',
                         total_elements_path: str = 'data.totalElements',
-                        pagination_in_body: bool = False, headers: Optional[Dict] = None) -> List[Dict]:
+                        pagination_in_body: bool = False, headers: Optional[Dict] = None,
+                        use_offset: bool = False) -> List[Dict]:
         """
         Fetch all pages of a paginated API endpoint
         
@@ -176,6 +177,7 @@ class HarnessAPIClient:
             total_elements_path: JSON path to total elements count (default: 'data.totalElements')
             pagination_in_body: If True, pagination params go in request body; if False, in query params (default: False)
             headers: Optional custom headers to include in requests
+            use_offset: If True, pagination value is calculated as offset = page * page_size; if False, uses page number directly (default: False)
         
         Returns:
             List of all items across all pages
@@ -188,16 +190,23 @@ class HarnessAPIClient:
         
         while True:
             # Set pagination parameters in the appropriate location
+            if use_offset:
+                # For offset-based pagination: offset = page * page_size
+                pagination_value = page * page_size
+            else:
+                # For page-based pagination: page number
+                pagination_value = page
+            
             if pagination_in_body and isinstance(data, dict):
                 # For POST requests where pagination goes in body
                 request_data = data.copy()
-                request_data[page_param_name] = page
+                request_data[page_param_name] = pagination_value
                 request_data[size_param_name] = page_size
                 request_params = params.copy()
             else:
                 # For GET requests or POST requests where pagination goes in query params
                 request_params = params.copy()
-                request_params[page_param_name] = page
+                request_params[page_param_name] = pagination_value
                 request_params[size_param_name] = page_size
                 request_data = data
             
@@ -1354,38 +1363,18 @@ class HarnessAPIClient:
             # Use _fetch_paginated helper with GET method
             # Pagination uses pageIndex and pageSize
             # Response is nested: data.content array, each item has 'role' key
-            all_roles = []
-            page_index = 0
-            page_size = 100
+            items = self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='pageIndex',
+                size_param_name='pageSize',
+                content_path='data.content'
+            )
             
-            while True:
-                params['pageIndex'] = page_index
-                params['pageSize'] = page_size
-                
-                response = self._make_request('GET', endpoint, params=params)
-                
-                if response.status_code != 200:
-                    print(f"Failed to list roles: {response.status_code} - {response.text}")
-                    break
-                
-                data = response.json()
-                # Extract from nested structure: data.content
-                content = data.get('data', {}).get('content', [])
-                
-                if not content:
-                    break
-                
-                # Extract role data from each item (each has a 'role' key)
-                for item in content:
-                    role_data = item.get('role', item)
-                    all_roles.append(role_data)
-                
-                # Check if there are more pages
-                total_pages = data.get('data', {}).get('totalPages', 1)
-                if page_index >= total_pages - 1:
-                    break
-                
-                page_index += 1
+            # Extract role data from each item (each has a 'role' key)
+            all_roles = []
+            for item in items:
+                role_data = item.get('role', item)
+                all_roles.append(role_data)
             
             return all_roles
         except Exception as e:
@@ -1502,39 +1491,21 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            # Use custom pagination logic (similar to roles)
-            all_resource_groups = []
-            page_index = 0
-            page_size = 100
+            # Use _fetch_paginated helper with GET method
+            # Pagination uses pageIndex and pageSize
+            # Response is nested: data.content array, each item has 'resourceGroup' key
+            items = self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='pageIndex',
+                size_param_name='pageSize',
+                content_path='data.content'
+            )
             
-            while True:
-                params['pageIndex'] = page_index
-                params['pageSize'] = page_size
-                
-                response = self._make_request('GET', endpoint, params=params)
-                
-                if response.status_code != 200:
-                    print(f"Failed to list resource groups: {response.status_code} - {response.text}")
-                    break
-                
-                data = response.json()
-                # Extract from nested structure: data.content
-                content = data.get('data', {}).get('content', [])
-                
-                if not content:
-                    break
-                
-                # Extract resource group data from each item (each has a 'resourceGroup' key)
-                for item in content:
-                    resource_group_data = item.get('resourceGroup', item)
-                    all_resource_groups.append(resource_group_data)
-                
-                # Check if there are more pages
-                total_pages = data.get('data', {}).get('totalPages', 1)
-                if page_index >= total_pages - 1:
-                    break
-                
-                page_index += 1
+            # Extract resource group data from each item (each has a 'resourceGroup' key)
+            all_resource_groups = []
+            for item in items:
+                resource_group_data = item.get('resourceGroup', item)
+                all_resource_groups.append(resource_group_data)
             
             return all_resource_groups
         except Exception as e:
@@ -1736,45 +1707,27 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            # Use custom pagination logic (similar to roles and resource groups)
-            all_users = []
-            page_index = 0
-            page_size = 100
+            # Use _fetch_paginated helper with POST method
+            # Pagination uses pageIndex and pageSize (in query params, not body)
+            # Response is nested: data.content array, each item has 'user' key
+            items = self._fetch_paginated(
+                'POST', endpoint, params=params, data={},
+                page_param_name='pageIndex',
+                size_param_name='pageSize',
+                content_path='data.content',
+                pagination_in_body=False
+            )
             
-            while True:
-                params['pageIndex'] = page_index
-                params['pageSize'] = page_size
-                
-                # POST request with empty body
-                response = self._make_request('POST', endpoint, params=params, data={})
-                
-                if response.status_code != 200:
-                    print(f"Failed to list users: {response.status_code} - {response.text}")
-                    break
-                
-                data = response.json()
-                # Extract from nested structure: data.content
-                content = data.get('data', {}).get('content', [])
-                
-                if not content:
-                    break
-                
-                # Extract user data from each item (each has a 'user' key)
-                for item in content:
-                    user_data = item.get('user', item)
-                    # Also include roleAssignmentMetadata for migration
-                    role_assignments = item.get('roleAssignmentMetadata', [])
-                    # Combine user data with role assignments
-                    user_with_roles = user_data.copy()
-                    user_with_roles['roleAssignmentMetadata'] = role_assignments
-                    all_users.append(user_with_roles)
-                
-                # Check if there are more pages
-                total_pages = data.get('data', {}).get('totalPages', 1)
-                if page_index >= total_pages - 1:
-                    break
-                
-                page_index += 1
+            # Extract user data from each item (each has a 'user' key)
+            all_users = []
+            for item in items:
+                user_data = item.get('user', item)
+                # Also include roleAssignmentMetadata for migration
+                role_assignments = item.get('roleAssignmentMetadata', [])
+                # Combine user data with role assignments
+                user_with_roles = user_data.copy()
+                user_with_roles['roleAssignmentMetadata'] = role_assignments
+                all_users.append(user_with_roles)
             
             return all_users
         except Exception as e:
@@ -1858,48 +1811,29 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            # Use custom pagination logic (similar to roles and resource groups)
+            # Use _fetch_paginated helper with GET method
             # Pagination uses pageIndex and pageSize
-            all_service_accounts = []
-            page_index = 0
-            page_size = 100
+            # Response is nested: data.content array, each item has 'serviceAccount' key
+            items = self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='pageIndex',
+                size_param_name='pageSize',
+                content_path='data.content'
+            )
             
-            while True:
-                params['pageIndex'] = page_index
-                params['pageSize'] = page_size
-                
-                response = self._make_request('GET', endpoint, params=params)
-                
-                if response.status_code != 200:
-                    print(f"Failed to list service accounts: {response.status_code} - {response.text}")
-                    break
-                
-                data = response.json()
-                # Extract from nested structure: data.content
-                content = data.get('data', {}).get('content', [])
-                
-                if not content:
-                    break
-                
-                # Extract service account data from each item (each has a 'serviceAccount' key)
-                for item in content:
-                    service_account_data = item.get('serviceAccount', item)
-                    # Also include roleAssignmentsMetadataDTO for migration (note: it's roleAssignmentsMetadataDTO, not roleAssignmentMetadata)
-                    # This field is always present in the item, regardless of API key count
-                    role_assignments = item.get('roleAssignmentsMetadataDTO', [])
-                    if role_assignments is None:
-                        role_assignments = []
-                    # Combine service account data with role assignments
-                    service_account_with_roles = service_account_data.copy()
-                    service_account_with_roles['roleAssignmentMetadata'] = role_assignments  # Normalize to roleAssignmentMetadata for consistency
-                    all_service_accounts.append(service_account_with_roles)
-                
-                # Check if there are more pages
-                total_pages = data.get('data', {}).get('totalPages', 1)
-                if page_index >= total_pages - 1:
-                    break
-                
-                page_index += 1
+            # Extract service account data from each item (each has a 'serviceAccount' key)
+            all_service_accounts = []
+            for item in items:
+                service_account_data = item.get('serviceAccount', item)
+                # Also include roleAssignmentsMetadataDTO for migration (note: it's roleAssignmentsMetadataDTO, not roleAssignmentMetadata)
+                # This field is always present in the item, regardless of API key count
+                role_assignments = item.get('roleAssignmentsMetadataDTO', [])
+                if role_assignments is None:
+                    role_assignments = []
+                # Combine service account data with role assignments
+                service_account_with_roles = service_account_data.copy()
+                service_account_with_roles['roleAssignmentMetadata'] = role_assignments  # Normalize to roleAssignmentMetadata for consistency
+                all_service_accounts.append(service_account_with_roles)
             
             return all_service_accounts
         except Exception as e:
@@ -2141,26 +2075,21 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            all_items = []
-            page = 0
-            while True:
-                params['offset'] = page * params['pageSize']
-                response = self._make_request('GET', endpoint, params=params)
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get('data', {}).get('content', [])
-                    if not items:
-                        break
-                    all_items.extend(items)
-                    if len(items) < params['pageSize']:
-                        break
-                    page += 1
-                    if page >= 10000:  # Safety limit
-                        break
-                else:
-                    print(f"Failed to list user journeys: {response.status_code} - {response.text}")
-                    break
-            return all_items
+            # Remove offset and pageSize from params - _fetch_paginated will handle them
+            params.pop('offset', None)
+            params.pop('pageSize', None)
+            
+            # Use _fetch_paginated helper
+            # Pagination uses offset and pageSize (offset-based, not page-based)
+            # Response is nested: data.content array
+            return self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='offset',
+                size_param_name='pageSize',
+                content_path='data.content',
+                page_size=100,
+                use_offset=True
+            )
         except Exception as e:
             print(f"Failed to list user journeys: {e}")
             return []
@@ -2219,26 +2148,22 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            all_items = []
-            page = 0
-            while True:
-                params['offset'] = page * params['pageSize']
-                response = self._make_request('GET', endpoint, params=params)
-                if response.status_code == 200:
-                    data = response.json()
-                    items = data.get('data', {}).get('content', [])
-                    if not items:
-                        break
-                    all_items.extend(items)
-                    if len(items) < params['pageSize']:
-                        break
-                    page += 1
-                    if page >= 10000:  # Safety limit
-                        break
-                else:
-                    print(f"Failed to list monitored services: {response.status_code} - {response.text}")
-                    break
-            return all_items
+            # Remove offset and pageSize from params - _fetch_paginated will handle them
+            # Note: monitored services uses pageSize=10 by default, but we'll use 100 for efficiency
+            params.pop('offset', None)
+            page_size = params.pop('pageSize', 100)
+            
+            # Use _fetch_paginated helper
+            # Pagination uses offset and pageSize (offset-based, not page-based)
+            # Response is nested: data.content array
+            return self._fetch_paginated(
+                'GET', endpoint, params=params,
+                page_param_name='offset',
+                size_param_name='pageSize',
+                content_path='data.content',
+                page_size=page_size,
+                use_offset=True
+            )
         except Exception as e:
             print(f"Failed to list monitored services: {e}")
             return []
@@ -2704,61 +2629,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        all_items = []
-        page_index = 0
-        page_size = 100
-        
-        while True:
-            params['pageIndex'] = page_index
-            params['pageSize'] = page_size
-            
-            response = self._make_request('POST', endpoint, params=params, data={
-                'filterType': 'Secret'
-            })
-            
-            if response.status_code != 200:
-                print(f"Failed to fetch secrets page {page_index}: {response.status_code} - {response.text}")
-                break
-            
-            response_data = response.json()
-            
-            # Extract content from response - v2 API structure may vary
-            content = response_data.get('data', {}).get('content', [])
-            if not content and 'content' in response_data:
-                content = response_data.get('content', [])
-            if not isinstance(content, list):
-                content = []
-            
-            all_items.extend(content)
-            
-            # Check pagination metadata
-            total_pages = None
-            try:
-                data_obj = response_data.get('data', {})
-                if 'totalPages' in data_obj:
-                    total_pages = int(data_obj['totalPages'])
-                elif 'totalPages' in response_data:
-                    total_pages = int(response_data['totalPages'])
-            except Exception:
-                pass
-            
-            # If we got fewer items than page_size, we're done
-            if len(content) < page_size:
-                break
-            
-            # If we have total_pages info, check if we've reached the last page
-            if total_pages is not None and page_index >= total_pages - 1:
-                break
-            
-            # Continue to next page
-            page_index += 1
-            
-            # Safety limit
-            if page_index > 10000:
-                print(f"Warning: Reached pagination limit at page {page_index}")
-                break
-        
-        return all_items
+        # Use _fetch_paginated helper with POST method
+        # Pagination uses pageIndex and pageSize (in query params, not body)
+        # Response is nested: data.content array
+        return self._fetch_paginated(
+            'POST', endpoint, params=params,
+            data={'filterType': 'Secret'},
+            page_param_name='pageIndex',
+            size_param_name='pageSize',
+            content_path='data.content',
+            pagination_in_body=False
+        )
     
     def get_secret_data(self, secret_identifier: str, org_identifier: Optional[str] = None,
                        project_identifier: Optional[str] = None) -> Optional[Dict]:
