@@ -449,5 +449,5 @@ Exported files include scope information:
 
 - [Harness API Documentation](https://apidocs.harness.io/)
 - [Harness Developer Hub](https://developer.harness.io/)
-- See `api-notes.md` for detailed API endpoint information
-- See `implementation-notes.md` for implementation-specific details and quirks
+- See `docs/api-notes.md` for detailed API endpoint information
+- See `docs/implementation-notes.md` for implementation-specific details and quirks
