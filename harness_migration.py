@@ -53,13 +53,14 @@ def extract_account_id_from_api_key(api_key: str) -> str:
 def is_resource_already_exists_error(status_code: int, response_text: str) -> bool:
     """Check if an API error response indicates a resource already exists"""
     # Check status codes that typically indicate resource already exists
-    if status_code not in [400, 409]:
+    # Include 500 for MongoDB duplicate key errors (e.g., user journeys)
+    if status_code not in [400, 409, 500]:
         return False
     
     response_lower = response_text.lower()
     
     # Specific error codes that indicate duplicate/existing resource
-    specific_error_codes = ['DUPLICATE_FIELD', 'DUPLICATE_FILE_IMPORT']
+    specific_error_codes = ['DUPLICATE_FIELD', 'DUPLICATE_FILE_IMPORT', 'INVALID_REQUEST']
     
     # Error messages that definitively indicate resource already exists
     # These must contain words like "already" or "duplicate" to avoid false positives
@@ -69,13 +70,28 @@ def is_resource_already_exists_error(status_code: int, response_text: str) -> bo
         'already been imported',
         'duplicate',
         'already been created',
-        'resource already'
+        'resource already',
+        'cannot be used',  # For connectors
+        'must be unique',  # For policies/policy sets
+        'already exists or',  # For pipelines
+        'e11000 duplicate key',  # MongoDB duplicate key errors
+        'dup key',  # MongoDB duplicate key errors
+        'identifier must be unique',  # For policies/policy sets
+        'already exists or is soft deleted',  # For triggers
+        'already exists or has been deleted',  # For pipelines
+        'already exists in this scope',  # For secrets
+        'already exists.',  # For IP allowlists
     ]
     
     # Check for specific error codes (these are definitive)
     for error_code in specific_error_codes:
         if error_code.lower() in response_lower:
-            return True
+            # For INVALID_REQUEST, also check if it contains "already exists" to avoid false positives
+            if error_code == 'INVALID_REQUEST':
+                if any(msg in response_lower for msg in ['already exists', 'already been imported', 'already present']):
+                    return True
+            else:
+                return True
     
     # Check for definitive error messages (these are definitive)
     for error_msg in definitive_error_messages:
@@ -88,6 +104,16 @@ def is_resource_already_exists_error(status_code: int, response_text: str) -> bo
 def format_resource_already_exists_message(resource_type: str, identifier: str, response_text: str, scope_info: str) -> str:
     """Format a user-friendly message when a resource already exists"""
     return f"Resource '{resource_type}' with identifier '{identifier}' already exists at {scope_info}. Skipping migration."
+
+
+def get_scope_info(org_identifier: Optional[str], project_identifier: Optional[str]) -> str:
+    """Helper to get a consistent scope info string"""
+    if not org_identifier:
+        return "account level"
+    elif not project_identifier:
+        return f"org {org_identifier} level"
+    else:
+        return f"project {project_identifier} (org {org_identifier}) level"
 
 
 class HarnessAPIClient:
@@ -310,7 +336,12 @@ class HarnessAPIClient:
             print(f"Successfully created organization")
             return True
         else:
-            print(f"Failed to create organization: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                identifier = cleaned_data.get('identifier', 'unknown')
+                scope_info = get_scope_info(None, None)
+                print(f"  {format_resource_already_exists_message('organization', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create organization: {response.status_code} - {response.text}")
             return False
     
     def list_projects(self, org_identifier: Optional[str] = None) -> List[Dict]:
@@ -379,7 +410,12 @@ class HarnessAPIClient:
             print(f"Successfully created project")
             return True
         else:
-            print(f"Failed to create project: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                identifier = cleaned_data.get('identifier', 'unknown')
+                scope_info = get_scope_info(org_identifier, None)
+                print(f"  {format_resource_already_exists_message('project', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create project: {response.status_code} - {response.text}")
             return False
     
     def list_pipelines(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -461,10 +497,14 @@ class HarnessAPIClient:
             print(f"Successfully created pipeline")
             return True
         else:
-            print(f"Failed to create pipeline: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('pipeline', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create pipeline: {response.status_code} - {response.text}")
             return False
     
-    def import_pipeline_yaml(self, git_details: Dict, pipeline_description: Optional[str] = None,
+    def import_pipeline_yaml(self, git_details: Dict, pipeline_identifier: str, pipeline_description: Optional[str] = None,
                              org_identifier: Optional[str] = None,
                              project_identifier: Optional[str] = None) -> bool:
         """Import pipeline from Git location (for GitX resources only)"""
@@ -498,7 +538,11 @@ class HarnessAPIClient:
             print(f"Successfully imported pipeline from GitX")
             return True
         else:
-            print(f"Failed to import pipeline from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('pipeline', pipeline_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import pipeline from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_input_sets(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
@@ -561,13 +605,29 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
+        # Extract identifier from input_set_data (could be in YAML or directly in data)
+        identifier = input_set_data.get('identifier', 'unknown')
+        if identifier == 'unknown' and 'inputSetYaml' in input_set_data:
+            # Try to parse identifier from YAML
+            try:
+                import yaml
+                parsed_yaml = yaml.safe_load(input_set_data['inputSetYaml'])
+                if parsed_yaml and isinstance(parsed_yaml, dict):
+                    identifier = parsed_yaml.get('inputSet', {}).get('identifier', 'unknown')
+            except:
+                pass
+        
         response = self._make_request('POST', endpoint, params=params, data=input_set_data)
         
         if response.status_code in [200, 201]:
             print(f"Successfully created input set")
             return True
         else:
-            print(f"Failed to create input set: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('input set', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create input set: {response.status_code} - {response.text}")
             return False
     
     def import_input_set_yaml(self, git_details: Dict, input_set_identifier: str, input_set_name: str,
@@ -681,11 +741,25 @@ class HarnessAPIClient:
         
         response = self._make_request('POST', endpoint, params=params, data=trigger_yaml, headers=headers)
         
+        # Extract identifier from YAML for error messages
+        identifier = 'unknown'
+        try:
+            import yaml
+            parsed_yaml = yaml.safe_load(trigger_yaml)
+            if parsed_yaml and isinstance(parsed_yaml, dict):
+                identifier = parsed_yaml.get('trigger', {}).get('identifier', 'unknown')
+        except:
+            pass
+        
         if response.status_code in [200, 201]:
             print(f"Successfully created trigger")
             return True
         else:
-            print(f"Failed to create trigger: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('trigger', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create trigger: {response.status_code} - {response.text}")
             return False
     
     def list_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -758,7 +832,11 @@ class HarnessAPIClient:
             print(f"Successfully created service")
             return True
         else:
-            print(f"Failed to create service: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('service', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create service: {response.status_code} - {response.text}")
             return False
     
     def import_service_yaml(self, git_details: Dict, service_identifier: str,
@@ -794,7 +872,11 @@ class HarnessAPIClient:
             print(f"Successfully imported service from GitX")
             return True
         else:
-            print(f"Failed to import service from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('service', service_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import service from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_overrides(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -931,11 +1013,17 @@ class HarnessAPIClient:
         
         response = self._make_request('POST', endpoint, params=params, data=request_body)
         
+        identifier = override_data.get('identifier', 'unknown')
+        
         if response.status_code in [200, 201]:
             print(f"Successfully created/upserted override")
             return True
         else:
-            print(f"Failed to create override: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('override', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create override: {response.status_code} - {response.text}")
             return False
     
     def import_override_yaml(self, override_data: Dict, git_details: Dict,
@@ -987,11 +1075,17 @@ class HarnessAPIClient:
         
         response = self._make_request('POST', endpoint, params=params, data=request_body)
         
+        identifier = override_data.get('identifier', 'unknown')
+        
         if response.status_code in [200, 201]:
             print(f"Successfully imported override from GitX")
             return True
         else:
-            print(f"Failed to import override from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('override', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import override from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_webhooks(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -1112,11 +1206,17 @@ class HarnessAPIClient:
         
         response = self._make_request('POST', endpoint, params=params, data=request_body, headers=headers)
         
+        identifier = webhook_data.get('webhook_identifier') or webhook_data.get('identifier', 'unknown')
+        
         if response.status_code in [200, 201]:
             print(f"Successfully created webhook")
             return True
         else:
-            print(f"Failed to create webhook: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('webhook', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create webhook: {response.status_code} - {response.text}")
             return False
     
     def list_policies(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -1201,11 +1301,17 @@ class HarnessAPIClient:
         
         response = self._make_request('POST', endpoint, params=params, data=request_body)
         
+        identifier = policy_data.get('identifier', 'unknown')
+        
         if response.status_code in [200, 201]:
             print(f"Successfully created policy")
             return True
         else:
-            print(f"Failed to create policy: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('policy', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create policy: {response.status_code} - {response.text}")
             return False
     
     def list_policy_sets(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -1340,7 +1446,11 @@ class HarnessAPIClient:
             print(f"Successfully created policy set")
             return True
         else:
-            print(f"Failed to create policy set: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('policy set', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create policy set: {response.status_code} - {response.text}")
             return False
     
     def list_roles(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -1447,7 +1557,11 @@ class HarnessAPIClient:
         create_response = self._make_request('POST', create_endpoint, params=params, data=create_body)
         
         if create_response.status_code not in [200, 201]:
-            print(f"Failed to create role: {create_response.status_code} - {create_response.text}")
+            if is_resource_already_exists_error(create_response.status_code, create_response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('role', identifier, create_response.text, scope_info)}")
+            else:
+                print(f"Failed to create role: {create_response.status_code} - {create_response.text}")
             return False
         
         # Step 2: Update role with PUT to add permissions and allowedScopeLevels
@@ -1675,6 +1789,9 @@ class HarnessAPIClient:
             'harness-account': self.account_id  # harness-account header is required
         }
         
+        # Extract identifier from ip_allowlist_data
+        identifier = ip_allowlist_data.get('identifier', 'unknown')
+        
         # Build request body with nested ip_allowlist_config structure
         request_body = {
             'ip_allowlist_config': ip_allowlist_data
@@ -1687,7 +1804,11 @@ class HarnessAPIClient:
             print(f"Successfully created IP allowlist")
             return True
         else:
-            print(f"Failed to create IP allowlist: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(None, None)  # IP allowlists are account-level only
+                print(f"  {format_resource_already_exists_message('IP allowlist', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create IP allowlist: {response.status_code} - {response.text}")
             return False
     
     def list_users(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -1912,7 +2033,11 @@ class HarnessAPIClient:
             print(f"Successfully created service account")
             return True
         else:
-            print(f"Failed to create service account: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('service account', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create service account: {response.status_code} - {response.text}")
             return False
     
     def add_role_bindings_to_service_account(self, service_account_identifier: str, role_bindings: List[Dict],
@@ -2347,7 +2472,11 @@ class HarnessAPIClient:
             print(f"Successfully created environment")
             return True
         else:
-            print(f"Failed to create environment: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('environment', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create environment: {response.status_code} - {response.text}")
             return False
     
     def import_environment_yaml(self, git_details: Dict, environment_identifier: str,
@@ -2383,7 +2512,11 @@ class HarnessAPIClient:
             print(f"Successfully imported environment from GitX")
             return True
         else:
-            print(f"Failed to import environment from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('environment', environment_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import environment from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_connectors(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -2467,7 +2600,21 @@ class HarnessAPIClient:
                 print(f"Successfully created connector")
                 return True
             else:
-                print(f"Failed to create connector: {response.status_code} - {response.text}")
+                # Extract identifier from YAML for error messages
+                identifier = 'unknown'
+                try:
+                    import yaml
+                    parsed_yaml = yaml.safe_load(yaml_content)
+                    if parsed_yaml and isinstance(parsed_yaml, dict):
+                        identifier = parsed_yaml.get('connector', {}).get('identifier', 'unknown')
+                except:
+                    pass
+                
+                if is_resource_already_exists_error(response.status_code, response.text):
+                    scope_info = get_scope_info(org_identifier, project_identifier)
+                    print(f"  {format_resource_already_exists_message('connector', identifier, response.text, scope_info)}")
+                else:
+                    print(f"Failed to create connector: {response.status_code} - {response.text}")
                 return False
         except requests.exceptions.RequestException as e:
             print(f"Request error: {e}")
@@ -2521,7 +2668,7 @@ class HarnessAPIClient:
             return infra_data.get('yaml', '')
         return None
     
-    def create_infrastructure(self, yaml_content: str, environment_identifier: str,
+    def create_infrastructure(self, yaml_content: str, infrastructure_identifier: str, environment_identifier: str,
                             org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
         """Create infrastructure from YAML content (for inline resources)"""
         endpoint = "/ng/api/infrastructures"
@@ -2550,7 +2697,11 @@ class HarnessAPIClient:
             print(f"Successfully created infrastructure")
             return True
         else:
-            print(f"Failed to create infrastructure: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('infrastructure', infrastructure_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create infrastructure: {response.status_code} - {response.text}")
             return False
     
     def import_infrastructure_yaml(self, git_details: Dict, infrastructure_identifier: str,
@@ -2732,13 +2883,19 @@ class HarnessAPIClient:
         
         response = self._make_request('POST', endpoint, params=params, data=request_body)
         
+        identifier = cleaned_data.get('identifier', 'unknown')
+        
         if response.status_code in [200, 201]:
             print(f"Successfully created secret")
             if is_harness_secret_manager:
                 print(f"  Warning: Secret uses harnessSecretManager ({secret_manager_identifier}), value set to 'changeme' - please update manually")
             return True
         else:
-            print(f"Failed to create secret: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('secret', identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to create secret: {response.status_code} - {response.text}")
             return False
     
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
@@ -2839,7 +2996,11 @@ class HarnessAPIClient:
                 print(f"Successfully created template version {version}")
                 return True
             else:
-                print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
+                if is_resource_already_exists_error(response.status_code, response.text):
+                    scope_info = get_scope_info(org_identifier, project_identifier)
+                    print(f"  {format_resource_already_exists_message(f'template version {version}', identifier, response.text, scope_info)}")
+                else:
+                    print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
                 return False
         except requests.exceptions.RequestException as e:
             print(f"Request error: {e}")
@@ -2885,7 +3046,11 @@ class HarnessAPIClient:
             print(f"Successfully imported template version {version} from GitX")
             return True
         else:
-            print(f"Failed to import template version {version} from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message(f'template version {version}', template_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import template version {version} from GitX: {response.status_code} - {response.text}")
             return False
 
 
@@ -3680,7 +3845,7 @@ class HarnessMigrator:
                         else:
                             # Inline: Use create endpoint with YAML content
                             if self.dest_client.create_infrastructure(
-                                yaml_content=yaml_content, environment_identifier=env_identifier,
+                                yaml_content=yaml_content, infrastructure_identifier=identifier, environment_identifier=env_identifier,
                                 org_identifier=org_id, project_identifier=project_id
                             ):
                                 results['success'] += 1
@@ -4985,7 +5150,7 @@ class HarnessMigrator:
                         # Extract pipeline description from pipeline data
                         pipeline_description = pipeline_data.get('description') or pipeline_data.get('pipelineDescription')
                         if self.dest_client.import_pipeline_yaml(
-                            git_details=git_details, pipeline_description=pipeline_description,
+                            git_details=git_details, pipeline_identifier=identifier, pipeline_description=pipeline_description,
                             org_identifier=org_id, project_identifier=project_id
                         ):
                             results['success'] += 1
