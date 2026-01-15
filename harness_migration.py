@@ -2103,19 +2103,16 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            response = self._make_request('GET', endpoint, params=params)
-            
-            if response.status_code != 200:
-                print(f"Failed to list API keys for service account: {response.status_code} - {response.text}")
-                return []
-            
-            data = response.json()
-            # Extract from nested structure: data.content
-            content = data.get('data', {}).get('content', [])
+            # Use _fetch_paginated helper
+            # Response is nested: data.content array, each item has 'apiKey' key
+            items = self._fetch_paginated(
+                'GET', endpoint, params=params,
+                content_path='data.content'
+            )
             
             # Extract API key data from each item
             api_keys = []
-            for item in content:
+            for item in items:
                 # API key data might be nested under 'apiKey' key or directly in item
                 api_key_data = item.get('apiKey', item)
                 api_keys.append(api_key_data)
@@ -3088,15 +3085,15 @@ class HarnessAPIClient:
                               project_identifier: Optional[str] = None) -> List[str]:
         """Get all versions of a template"""
         endpoint = "/template/api/templates/list-metadata"
-        params = {}
+        params = {
+            'templateListType': 'All',
+            'module': 'cd',
+            'routingId': self.account_id
+        }
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
-        params['templateListType'] = 'All'
-        params['size'] = 100
-        params['module'] = 'cd'
-        params['routingId'] = self.account_id
         
         # Request body with template identifier filter
         request_body = {
@@ -3104,11 +3101,14 @@ class HarnessAPIClient:
             'templateIdentifiers': [template_identifier]
         }
         
-        response = self._make_request('POST', endpoint, params=params, data=request_body)
-        
-        if response.status_code == 200:
-            data = response.json()
-            content = data.get('data', {}).get('content', [])
+        try:
+            # Use _fetch_paginated helper
+            content = self._fetch_paginated(
+                'POST', endpoint, params=params,
+                data=request_body,
+                content_path='data.content'
+            )
+            
             # Extract versionLabel from each template entry
             version_list = []
             for template_entry in content:
@@ -3116,8 +3116,8 @@ class HarnessAPIClient:
                 if version_label:
                     version_list.append(version_label)
             return version_list
-        else:
-            print(f"Failed to get template versions: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"Failed to get template versions: {e}")
             return []
     
     def get_template_data(self, template_identifier: str, version: str,
