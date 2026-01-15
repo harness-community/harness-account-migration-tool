@@ -605,17 +605,25 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        # Extract identifier from input_set_data (could be in YAML or directly in data)
+        # Extract identifier from input_set_data
+        # The data may be:
+        # 1. A parsed YAML dict with nested structure: {'inputSet': {'identifier': '...', ...}}
+        # 2. A flat dict with 'identifier' at top level
+        # 3. A dict containing 'inputSetYaml' string that needs parsing
         identifier = input_set_data.get('identifier', 'unknown')
-        if identifier == 'unknown' and 'inputSetYaml' in input_set_data:
-            # Try to parse identifier from YAML
-            try:
-                import yaml
-                parsed_yaml = yaml.safe_load(input_set_data['inputSetYaml'])
-                if parsed_yaml and isinstance(parsed_yaml, dict):
-                    identifier = parsed_yaml.get('inputSet', {}).get('identifier', 'unknown')
-            except:
-                pass
+        if identifier == 'unknown':
+            # Check for nested inputSet structure (parsed YAML)
+            if 'inputSet' in input_set_data and isinstance(input_set_data.get('inputSet'), dict):
+                identifier = input_set_data.get('inputSet', {}).get('identifier', 'unknown')
+            # Check for inputSetYaml string that needs parsing
+            elif 'inputSetYaml' in input_set_data:
+                try:
+                    import yaml
+                    parsed_yaml = yaml.safe_load(input_set_data['inputSetYaml'])
+                    if parsed_yaml and isinstance(parsed_yaml, dict):
+                        identifier = parsed_yaml.get('inputSet', {}).get('identifier', 'unknown')
+                except:
+                    pass
         
         response = self._make_request('POST', endpoint, params=params, data=input_set_data)
         
@@ -671,7 +679,11 @@ class HarnessAPIClient:
             print(f"Successfully imported input set from GitX")
             return True
         else:
-            print(f"Failed to import input set from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('input set', input_set_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import input set from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_triggers(self, pipeline_identifier: str, org_identifier: Optional[str] = None,
@@ -1908,8 +1920,16 @@ class HarnessAPIClient:
             if user_status in ['USER_INVITED_SUCCESSFULLY', 'USER_ADDED_SUCCESSFULLY']:
                 print(f"Successfully created user")
                 return True
+            elif user_status == 'USER_ALREADY_ADDED':
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  User '{email}' is already a member at {scope_info}. Skipping migration.")
+                return False
+            elif user_status == 'USER_ALREADY_INVITED':
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  User '{email}' has already been invited at {scope_info}. Skipping migration.")
+                return False
             else:
-                print(f"User creation returned status: {user_status}")
+                print(f"User creation returned unexpected status: {user_status}")
                 return False
         else:
             print(f"Failed to create user: {response.status_code} - {response.text}")
@@ -2739,7 +2759,11 @@ class HarnessAPIClient:
             print(f"Successfully imported infrastructure from GitX")
             return True
         else:
-            print(f"Failed to import infrastructure from GitX: {response.status_code} - {response.text}")
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('infrastructure', infrastructure_identifier, response.text, scope_info)}")
+            else:
+                print(f"Failed to import infrastructure from GitX: {response.status_code} - {response.text}")
             return False
     
     def list_templates(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -4350,14 +4374,17 @@ class HarnessMigrator:
             
             policies = self.source_client.list_policies(org_id, project_id)
             
+            # Count built-in policies to summarize at end
+            builtin_count = 0
+            
             for policy in policies:
                 # Policy data is directly in the list response (not nested)
                 identifier = policy.get('identifier', '')
                 name = policy.get('name', identifier)
                 
-                # Skip built-in example policies
+                # Skip built-in example policies (count but don't print each one)
                 if self._is_builtin_example_policy(identifier):
-                    print(f"\nSkipping built-in example policy: {name} ({identifier})")
+                    builtin_count += 1
                     results['skipped'] += 1
                     continue
                 
@@ -4419,6 +4446,10 @@ class HarnessMigrator:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
+            
+            # Print summary of skipped built-in policies for this scope
+            if builtin_count > 0:
+                print(f"  Skipped {builtin_count} built-in example policy(ies) at {scope_label}")
         
         return results
     
