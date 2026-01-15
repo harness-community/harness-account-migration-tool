@@ -906,48 +906,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        all_items = []
-        page = 0
-        page_size = 100
-        
-        while True:
-            params['page'] = page
-            params['size'] = page_size
-            
-            # POST request with null body
-            response = self._make_request('POST', endpoint, params=params, data=None)
-            
-            if response.status_code != 200:
-                print(f"Failed to fetch overrides page {page}: {response.status_code} - {response.text}")
-                break
-            
-            response_data = response.json()
-            
-            # Extract content from response - overrides are in data.content
-            content = response_data.get('data', {}).get('content', [])
-            if not isinstance(content, list):
-                content = []
-            
-            all_items.extend(content)
-            
-            # Check pagination metadata
-            total_pages = response_data.get('data', {}).get('totalPages')
-            if total_pages is not None:
-                if page >= total_pages - 1:
-                    break
-            elif len(content) < page_size:
-                # If we got fewer items than page_size, we're done
-                break
-            
-            # Continue to next page
-            page += 1
-            
-            # Safety limit
-            if page > 10000:
-                print(f"Warning: Reached pagination limit at page {page}")
-                break
-        
-        return all_items
+        try:
+            return self._fetch_paginated(
+                'POST', endpoint, params=params,
+                data=None,  # POST with null body
+                page_param_name='page',
+                size_param_name='size',
+                content_path='data.content'
+            )
+        except Exception as e:
+            print(f"Failed to list overrides: {e}")
+            return []
     
     def get_override_data(self, override_identifier: str, org_identifier: Optional[str] = None,
                          project_identifier: Optional[str] = None, 
