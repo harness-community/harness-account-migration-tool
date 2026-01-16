@@ -334,15 +334,16 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created organization")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 identifier = cleaned_data.get('identifier', 'unknown')
                 scope_info = get_scope_info(None, None)
                 print(f"  {format_resource_already_exists_message('organization', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create organization: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_projects(self, org_identifier: Optional[str] = None) -> List[Dict]:
         """List all projects with pagination support"""
@@ -408,15 +409,16 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created project")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 identifier = cleaned_data.get('identifier', 'unknown')
                 scope_info = get_scope_info(org_identifier, None)
                 print(f"  {format_resource_already_exists_message('project', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create project: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_pipelines(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all pipelines with pagination support"""
@@ -495,14 +497,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created pipeline")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('pipeline', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create pipeline: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_pipeline_yaml(self, git_details: Dict, pipeline_identifier: str, pipeline_description: Optional[str] = None,
                              org_identifier: Optional[str] = None,
@@ -536,14 +539,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported pipeline from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('pipeline', pipeline_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import pipeline from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_input_sets(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
                        project_identifier: Optional[str] = None) -> List[Dict]:
@@ -629,14 +633,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created input set")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('input set', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create input set: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_input_set_yaml(self, git_details: Dict, input_set_identifier: str, input_set_name: str,
                              pipeline_identifier: str, input_set_description: Optional[str] = None,
@@ -677,14 +682,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported input set from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('input set', input_set_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import input set from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_triggers(self, pipeline_identifier: str, org_identifier: Optional[str] = None,
                      project_identifier: Optional[str] = None) -> List[Dict]:
@@ -765,14 +771,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created trigger")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('trigger', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create trigger: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all services with pagination support"""
@@ -842,14 +849,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created service")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('service', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create service: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_service_yaml(self, git_details: Dict, service_identifier: str,
                            connector_ref: Optional[str] = None,
@@ -882,14 +890,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported service from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('service', service_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import service from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_overrides(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all overrides with pagination support
@@ -998,14 +1007,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created/upserted override")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('override', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create override: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_override_yaml(self, override_data: Dict, git_details: Dict,
                             org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
@@ -1060,14 +1070,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported override from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('override', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import override from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_webhooks(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all webhooks with pagination support
@@ -1191,14 +1202,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created webhook")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('webhook', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create webhook: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_policies(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all policies with pagination support
@@ -1286,14 +1298,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created policy")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('policy', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create policy: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_policy_sets(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all policy sets with pagination support
@@ -1425,14 +1438,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created policy set")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('policy set', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create policy set: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_roles(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all roles with pagination support
@@ -1541,9 +1555,10 @@ class HarnessAPIClient:
             if is_resource_already_exists_error(create_response.status_code, create_response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('role', identifier, create_response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create role: {create_response.status_code} - {create_response.text}")
-            return False
+            return "failed"
         
         # Step 2: Update role with PUT to add permissions and allowedScopeLevels
         update_endpoint = f"/authz/api/roles/{identifier}"
@@ -1564,10 +1579,10 @@ class HarnessAPIClient:
         
         if update_response.status_code in [200, 201]:
             print(f"Successfully created and updated role")
-            return True
+            return "success"
         else:
             print(f"Failed to update role with permissions: {update_response.status_code} - {update_response.text}")
-            return False
+            return "failed"
     
     def list_resource_groups(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all resource groups with pagination support
@@ -1783,14 +1798,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created IP allowlist")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(None, None)  # IP allowlists are account-level only
                 print(f"  {format_resource_already_exists_message('IP allowlist', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create IP allowlist: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_users(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all users with pagination support
@@ -1888,21 +1904,21 @@ class HarnessAPIClient:
             user_status = add_user_response_map.get(email, '')
             if user_status in ['USER_INVITED_SUCCESSFULLY', 'USER_ADDED_SUCCESSFULLY']:
                 print(f"Successfully created user")
-                return True
+                return "success"
             elif user_status == 'USER_ALREADY_ADDED':
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  User '{email}' is already a member at {scope_info}. Skipping migration.")
-                return False
+                return "skipped"
             elif user_status == 'USER_ALREADY_INVITED':
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  User '{email}' has already been invited at {scope_info}. Skipping migration.")
-                return False
+                return "skipped"
             else:
                 print(f"User creation returned unexpected status: {user_status}")
-                return False
+                return "failed"
         else:
             print(f"Failed to create user: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_service_accounts(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all service accounts with pagination support
@@ -2020,14 +2036,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created service account")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('service account', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create service account: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def add_role_bindings_to_service_account(self, service_account_identifier: str, role_bindings: List[Dict],
                                             org_identifier: Optional[str] = None,
@@ -2226,7 +2243,7 @@ class HarnessAPIClient:
         response = self._make_request('POST', endpoint, params=params, data=request_body)
         
         if response.status_code in [200, 201]:
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 # Build scope info string
@@ -2237,9 +2254,10 @@ class HarnessAPIClient:
                 else:
                     scope_info = f"project {project_identifier} (org {org_identifier}) level"
                 print(f"  {format_resource_already_exists_message('user journey', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create user journey: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     # Monitored Services (SRM)
     def list_monitored_services(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -2318,7 +2336,7 @@ class HarnessAPIClient:
         response = self._make_request('POST', endpoint, params=params, data=cleaned_data)
         
         if response.status_code in [200, 201]:
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 identifier = cleaned_data.get('identifier', 'unknown')
@@ -2330,9 +2348,10 @@ class HarnessAPIClient:
                 else:
                     scope_info = f"project {project_identifier} (org {org_identifier}) level"
                 print(f"  {format_resource_already_exists_message('monitored service', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create monitored service: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def update_monitored_service(self, identifier: str, monitored_service_data: Dict,
                                 org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> bool:
@@ -2448,15 +2467,16 @@ class HarnessAPIClient:
         response = self._make_request('POST', endpoint, params=params, data=cleaned_data)
         
         if response.status_code in [200, 201]:
-            return True
+            return "success"
         else:
             identifier = cleaned_data.get('identifier', 'unknown')
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('SLO notification rule', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create SLO notification rule: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     # SLOs (Service Level Objectives - SRM)
     def list_slos(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
@@ -2541,15 +2561,16 @@ class HarnessAPIClient:
         response = self._make_request('POST', endpoint, params=params, data=cleaned_data)
         
         if response.status_code in [200, 201]:
-            return True
+            return "success"
         else:
             identifier = cleaned_data.get('identifier', 'unknown')
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('SLO', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create SLO: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_environments(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all environments with pagination support"""
@@ -2649,14 +2670,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created environment")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('environment', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create environment: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_environment_yaml(self, git_details: Dict, environment_identifier: str,
                                connector_ref: Optional[str] = None,
@@ -2689,14 +2711,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported environment from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('environment', environment_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import environment from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_connectors(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all connectors with pagination support"""
@@ -2774,7 +2797,7 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created connector")
-            return True
+            return "success"
         else:
             # Extract identifier from YAML for error messages
             identifier = 'unknown'
@@ -2789,9 +2812,10 @@ class HarnessAPIClient:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('connector', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create connector: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_infrastructures(self, environment_identifier: str, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all infrastructures for a specific environment with pagination support"""
@@ -2868,14 +2892,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created infrastructure")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('infrastructure', infrastructure_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create infrastructure: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_infrastructure_yaml(self, git_details: Dict, infrastructure_identifier: str,
                                   environment_identifier: str,
@@ -2910,14 +2935,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported infrastructure from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('infrastructure', infrastructure_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import infrastructure from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def list_templates(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all templates with pagination support"""
@@ -3066,14 +3092,15 @@ class HarnessAPIClient:
             print(f"Successfully created secret")
             if is_harness_secret_manager:
                 print(f"  Warning: Secret uses harnessSecretManager ({secret_manager_identifier}), value set to 'changeme' - please update manually")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message('secret', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create secret: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
                               project_identifier: Optional[str] = None) -> List[Dict]:
@@ -3371,8 +3398,11 @@ class HarnessMigrator:
                 print(f"  [DRY RUN] Would create organization: {org_name} ({org_id})")
                 results['success'] += 1
             elif self.dest_client:
-                if self.dest_client.create_organization(org_data, dry_run=self.dry_run):
+                result = self.dest_client.create_organization(org_data, dry_run=self.dry_run)
+                if result == "success" or result == True:
                     results['success'] += 1
+                elif result == "skipped":
+                    results['skipped'] += 1
                 else:
                     results['failed'] += 1
             else:
@@ -3431,8 +3461,11 @@ class HarnessMigrator:
                 print(f"  [DRY RUN] Would create project: {project_name} ({project_id}) in org {org_id_display}")
                 results['success'] += 1
             elif self.dest_client:
-                if self.dest_client.create_project(project_data, org_id, dry_run=self.dry_run):
+                result = self.dest_client.create_project(project_data, org_id, dry_run=self.dry_run)
+                if result == "success" or result == True:
                     results['success'] += 1
+                elif result == "skipped":
+                    results['skipped'] += 1
                 else:
                     results['failed'] += 1
             else:
@@ -3566,10 +3599,13 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create custom secret manager connector to destination account")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_connector_yaml(
+                    result = self.dest_client.create_connector_yaml(
                         yaml_content, org_id, project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -3627,10 +3663,13 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create secret manager connector to destination account")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_connector_yaml(
+                    result = self.dest_client.create_connector_yaml(
                         yaml_content, org_id, project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -3692,10 +3731,13 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create connector to destination account")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_connector_yaml(
+                    result = self.dest_client.create_connector_yaml(
                         yaml_content, org_id, project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -3770,10 +3812,13 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager: {secret_manager})")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_secret(
+                    result = self.dest_client.create_secret(
                         secret_data=secret_data, org_identifier=org_id, project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -3839,10 +3884,13 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create secret")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_secret(
+                    result = self.dest_client.create_secret(
                         secret_data=secret_data, org_identifier=org_id, project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -3926,22 +3974,28 @@ class HarnessMigrator:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
                         connector_ref = env_data.get('connectorRef')
-                        if self.dest_client.import_environment_yaml(
+                        result = self.dest_client.import_environment_yaml(
                             git_details=git_details, environment_identifier=identifier,
                             connector_ref=connector_ref,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                     else:
                         # Inline: Use create endpoint with YAML content
                         env_type = env_data.get('type', 'Production')  # Default to Production if not specified
-                        if self.dest_client.create_environment(
+                        result = self.dest_client.create_environment(
                             yaml_content=yaml_content, identifier=identifier, type=env_type, name=name,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                 
@@ -4049,22 +4103,28 @@ class HarnessMigrator:
                         if is_gitx:
                             # GitX: Use import endpoint with git details
                             connector_ref = infra_data.get('connectorRef')
-                            if self.dest_client.import_infrastructure_yaml(
+                            result = self.dest_client.import_infrastructure_yaml(
                                 git_details=git_details, infrastructure_identifier=identifier,
                                 environment_identifier=env_identifier,
                                 connector_ref=connector_ref,
                                 org_identifier=org_id, project_identifier=project_id
-                            ):
+                            )
+                            if result == "success" or result == True:
                                 results['success'] += 1
+                            elif result == "skipped":
+                                results['skipped'] += 1
                             else:
                                 results['failed'] += 1
                         else:
                             # Inline: Use create endpoint with YAML content
-                            if self.dest_client.create_infrastructure(
+                            result = self.dest_client.create_infrastructure(
                                 yaml_content=yaml_content, infrastructure_identifier=identifier, environment_identifier=env_identifier,
                                 org_identifier=org_id, project_identifier=project_id
-                            ):
+                            )
+                            if result == "success" or result == True:
                                 results['success'] += 1
+                            elif result == "skipped":
+                                results['skipped'] += 1
                             else:
                                 results['failed'] += 1
                     
@@ -4148,21 +4208,27 @@ class HarnessMigrator:
                     if is_gitx:
                         # GitX: Use import endpoint with git details
                         connector_ref = service_data.get('connectorRef')
-                        if self.dest_client.import_service_yaml(
+                        result = self.dest_client.import_service_yaml(
                             git_details=git_details, service_identifier=identifier,
                             connector_ref=connector_ref,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                     else:
                         # Inline: Use create endpoint with YAML content
-                        if self.dest_client.create_service(
+                        result = self.dest_client.create_service(
                             yaml_content=yaml_content, identifier=identifier, name=name,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                 
@@ -4288,22 +4354,28 @@ class HarnessMigrator:
                 else:
                     if is_gitx:
                         # GitX: Use import endpoint with git details and override data
-                        if self.dest_client.import_override_yaml(
+                        result = self.dest_client.import_override_yaml(
                             override_data=override_data,
                             git_details=git_details,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                     else:
                         # Inline: Use create endpoint with override data
-                        if self.dest_client.create_override(
+                        result = self.dest_client.create_override(
                             override_data=override_data,
                             org_identifier=org_id,
                             project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                 
@@ -4361,14 +4433,17 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create user journey (Inline) with JSON data")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_user_journey(
+                    result = self.dest_client.create_user_journey(
                         identifier=identifier,
                         name=name,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         print(f"  Successfully created user journey")
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4443,11 +4518,12 @@ class HarnessMigrator:
                 else:
                     # Step 1: Create monitored service (without health sources initially, or with them if included)
                     # The create API may accept health sources in the initial request
-                    if self.dest_client.create_monitored_service(
+                    result = self.dest_client.create_monitored_service(
                         monitored_service_data=full_ms_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         print(f"  Successfully created monitored service")
                         # Step 2: If health sources exist and weren't included in create, update to add them
                         # Actually, based on HAR file, health sources are added via PUT update
@@ -4466,6 +4542,8 @@ class HarnessMigrator:
                             else:
                                 print(f"  Warning: Monitored service created but failed to add health sources")
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4533,13 +4611,16 @@ class HarnessMigrator:
                     print(f"  [DRY RUN] Would create SLO notification rule (Inline) with JSON data")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_slo_notification_rule(
+                    result = self.dest_client.create_slo_notification_rule(
                         notification_rule_data=full_nr_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         print(f"  Successfully created SLO notification rule")
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4631,13 +4712,16 @@ class HarnessMigrator:
                         print(f"  [DRY RUN] SLO references {len(notification_rule_refs)} notification rule(s)")
                     results['success'] += 1
                 else:
-                    if self.dest_client.create_slo(
+                    result = self.dest_client.create_slo(
                         slo_data=full_slo_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         print(f"  Successfully created SLO")
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4707,12 +4791,15 @@ class HarnessMigrator:
                     results['success'] += 1
                 else:
                     # Use create endpoint with webhook data
-                    if self.dest_client.create_webhook(
+                    result = self.dest_client.create_webhook(
                         webhook_data=webhook_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4800,12 +4887,15 @@ class HarnessMigrator:
                 else:
                     # Always use create endpoint (GitX import not supported)
                     # Create as inline even if it was GitX in source
-                    if self.dest_client.create_policy(
+                    result = self.dest_client.create_policy(
                         policy_data=policy_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4876,12 +4966,15 @@ class HarnessMigrator:
                     results['success'] += 1
                 else:
                     # Use create endpoint with policy set data
-                    if self.dest_client.create_policy_set(
+                    result = self.dest_client.create_policy_set(
                         policy_set_data=policy_set_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -4960,12 +5053,15 @@ class HarnessMigrator:
                     results['success'] += 1
                 else:
                     # Use create endpoint with role data
-                    if self.dest_client.create_role(
+                    result = self.dest_client.create_role(
                         role_data=full_role_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -5044,12 +5140,15 @@ class HarnessMigrator:
                     results['success'] += 1
                 else:
                     # Use create endpoint with resource group data
-                    if self.dest_client.create_resource_group(
+                    result = self.dest_client.create_resource_group(
                         resource_group_data=full_resource_group_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -5219,10 +5318,13 @@ class HarnessMigrator:
                 results['success'] += 1
             else:
                 # Use create endpoint with IP allowlist data
-                if self.dest_client.create_ip_allowlist(
+                result = self.dest_client.create_ip_allowlist(
                     ip_allowlist_data=allowlist_data
-                ):
+                )
+                if result == "success" or result == True:
                     results['success'] += 1
+                elif result == "skipped":
+                    results['skipped'] += 1
                 else:
                     results['failed'] += 1
             
@@ -5292,12 +5394,15 @@ class HarnessMigrator:
                     results['success'] += 1
                 else:
                     # Use create endpoint with user data
-                    if self.dest_client.create_user(
+                    result = self.dest_client.create_user(
                         user_data=user_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "success" or result == True:
                         results['success'] += 1
+                    elif result == "skipped":
+                        results['skipped'] += 1
                     else:
                         results['failed'] += 1
                 
@@ -5388,11 +5493,15 @@ class HarnessMigrator:
                     results['success'] += 1
                 else:
                     # Step 1: Create service account (without role bindings)
-                    if not self.dest_client.create_service_account(
+                    result = self.dest_client.create_service_account(
                         service_account_data=full_service_account_data,
                         org_identifier=org_id,
                         project_identifier=project_id
-                    ):
+                    )
+                    if result == "skipped":
+                        results['skipped'] += 1
+                        continue
+                    elif result != "success" and result != True:
                         results['failed'] += 1
                         continue
                     
@@ -5544,11 +5653,14 @@ class HarnessMigrator:
                         # GitX: Use import endpoint with git details
                         # Extract pipeline description from pipeline data
                         pipeline_description = pipeline_data.get('description') or pipeline_data.get('pipelineDescription')
-                        if self.dest_client.import_pipeline_yaml(
+                        result = self.dest_client.import_pipeline_yaml(
                             git_details=git_details, pipeline_identifier=identifier, pipeline_description=pipeline_description,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                     else:
@@ -5564,11 +5676,14 @@ class HarnessMigrator:
                             except Exception as e:
                                 print(f"  Warning: Failed to parse YAML for tags: {e}")
                         
-                        if self.dest_client.create_pipeline(
+                        result = self.dest_client.create_pipeline(
                             yaml_content=yaml_content, identifier=identifier, name=name,
                             org_identifier=org_id, project_identifier=project_id, tags=tags
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                 
@@ -5680,13 +5795,16 @@ class HarnessMigrator:
                             # Extract input set name and description from input set data
                             input_set_name = input_set_data.get('name', name)
                             input_set_description = input_set_data.get('description') or input_set_data.get('inputSetDescription')
-                            if self.dest_client.import_input_set_yaml(
+                            result = self.dest_client.import_input_set_yaml(
                                 git_details=git_details, input_set_identifier=identifier,
                                 input_set_name=input_set_name, pipeline_identifier=pipeline_identifier,
                                 input_set_description=input_set_description,
                                 org_identifier=org_id, project_identifier=project_id
-                            ):
+                            )
+                            if result == "success" or result == True:
                                 results['success'] += 1
+                            elif result == "skipped":
+                                results['skipped'] += 1
                             else:
                                 results['failed'] += 1
                         else:
@@ -5706,11 +5824,14 @@ class HarnessMigrator:
                             # Create a safe copy for creation (remove read-only fields)
                             export_data = clean_for_creation(input_set_dict.copy())
                             
-                            if self.dest_client.create_input_set(
+                            result = self.dest_client.create_input_set(
                                 input_set_data=export_data, pipeline_identifier=pipeline_identifier,
                                 org_identifier=org_id, project_identifier=project_id
-                            ):
+                            )
+                            if result == "success" or result == True:
                                 results['success'] += 1
+                            elif result == "skipped":
+                                results['skipped'] += 1
                             else:
                                 results['failed'] += 1
                     
@@ -5783,11 +5904,14 @@ class HarnessMigrator:
                         print(f"    [DRY RUN] Would create trigger in destination account")
                         results['success'] += 1
                     else:
-                        if self.dest_client.create_trigger(
+                        result = self.dest_client.create_trigger(
                             trigger_yaml=trigger_yaml, pipeline_identifier=pipeline_identifier,
                             org_identifier=org_id, project_identifier=project_id
-                        ):
+                        )
+                        if result == "success" or result == True:
                             results['success'] += 1
+                        elif result == "skipped":
+                            results['skipped'] += 1
                         else:
                             results['failed'] += 1
                     
