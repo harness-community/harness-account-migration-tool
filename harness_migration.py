@@ -16,6 +16,75 @@ from typing import Dict, List, Optional, Any, Union
 from pathlib import Path
 import time
 import argparse
+from dataclasses import dataclass, field
+
+
+@dataclass
+class HTTPConfig:
+    """Configuration for HTTP requests including proxy and custom headers"""
+    proxies: Dict[str, str] = field(default_factory=dict)
+    custom_headers: Dict[str, str] = field(default_factory=dict)
+    verify_ssl: bool = True
+    timeout: int = 30
+    
+    @classmethod
+    def from_file(cls, config_path: str) -> 'HTTPConfig':
+        """Load HTTP configuration from a YAML file"""
+        config = cls()
+        
+        if not config_path:
+            return config
+            
+        config_file = Path(config_path)
+        if not config_file.exists():
+            print(f"Warning: Config file '{config_path}' not found. Using default settings.")
+            return config
+        
+        try:
+            with open(config_file, 'r') as f:
+                file_config = yaml.safe_load(f)
+            
+            if not file_config:
+                return config
+            
+            # Load proxy settings
+            proxy_config = file_config.get('proxy', {})
+            if proxy_config:
+                if proxy_config.get('http'):
+                    config.proxies['http'] = proxy_config['http']
+                if proxy_config.get('https'):
+                    config.proxies['https'] = proxy_config['https']
+                # Support for no_proxy as environment-style setting
+                if proxy_config.get('no_proxy'):
+                    # requests library uses NO_PROXY environment variable
+                    os.environ['NO_PROXY'] = proxy_config['no_proxy']
+            
+            # Load custom headers
+            headers_config = file_config.get('headers', {})
+            if headers_config and isinstance(headers_config, dict):
+                config.custom_headers = headers_config
+            
+            # Load SSL verification setting
+            if 'verify_ssl' in file_config:
+                config.verify_ssl = file_config['verify_ssl']
+            
+            # Load timeout setting
+            if 'timeout' in file_config:
+                config.timeout = file_config['timeout']
+            
+            print(f"Loaded HTTP configuration from: {config_path}")
+            if config.proxies:
+                print(f"  Proxy configured: {list(config.proxies.keys())}")
+            if config.custom_headers:
+                print(f"  Custom headers: {list(config.custom_headers.keys())}")
+            if not config.verify_ssl:
+                print(f"  SSL verification: disabled")
+            
+            return config
+            
+        except Exception as e:
+            print(f"Warning: Failed to load config file '{config_path}': {e}")
+            return config
 
 
 def remove_none_values(data: Any) -> Any:
@@ -119,7 +188,8 @@ def get_scope_info(org_identifier: Optional[str], project_identifier: Optional[s
 class HarnessAPIClient:
     """Client for interacting with Harness API"""
     
-    def __init__(self, api_key: str, account_id: Optional[str] = None, base_url: str = "https://app.harness.io/gateway"):
+    def __init__(self, api_key: str, account_id: Optional[str] = None, base_url: str = "https://app.harness.io/gateway",
+                 http_config: Optional[HTTPConfig] = None):
         self.api_key = api_key
         # Extract account ID from API key if not provided
         if account_id:
@@ -127,51 +197,70 @@ class HarnessAPIClient:
         else:
             self.account_id = extract_account_id_from_api_key(api_key)
         self.base_url = base_url
+        self.http_config = http_config or HTTPConfig()
+        
+        # Create a session for connection pooling and consistent settings
+        self.session = requests.Session()
+        
+        # Set default headers
         self.headers = {
             'x-api-key': api_key,
             'Content-Type': 'application/json'
         }
+        
+        # Add custom headers from config
+        if self.http_config.custom_headers:
+            self.headers.update(self.http_config.custom_headers)
+        
+        # Configure session with headers
+        self.session.headers.update(self.headers)
+        
+        # Configure proxy settings
+        if self.http_config.proxies:
+            self.session.proxies.update(self.http_config.proxies)
+        
+        # Configure SSL verification
+        self.session.verify = self.http_config.verify_ssl
     
     def _make_request(self, method: str, endpoint: str, data: Optional[Union[Dict, str]] = None, 
                      params: Optional[Dict] = None, headers: Optional[Dict] = None) -> requests.Response:
-        """Make an API request"""
+        """Make an API request using the configured session"""
         url = f"{self.base_url}{endpoint}"
         if params is None:
             params = {}
         params['accountIdentifier'] = self.account_id
         
-        # Merge custom headers with default headers
-        request_headers = self.headers.copy()
+        # Merge custom headers with default headers for this specific request
+        request_headers = {}
         if headers:
             request_headers.update(headers)
         
+        timeout = self.http_config.timeout
+        
         try:
             if method.upper() == 'GET':
-                response = requests.get(url, headers=request_headers, params=params, json=data if isinstance(data, dict) else None)
+                response = self.session.get(url, headers=request_headers, params=params, 
+                                           json=data if isinstance(data, dict) else None, timeout=timeout)
             elif method.upper() == 'POST':
                 # If data is a string, send it as raw data; otherwise send as JSON
                 if isinstance(data, str):
-                    response = requests.post(url, headers=request_headers, params=params, data=data)
+                    response = self.session.post(url, headers=request_headers, params=params, data=data, timeout=timeout)
                 else:
-                    response = requests.post(url, headers=request_headers, params=params, json=data)
+                    response = self.session.post(url, headers=request_headers, params=params, json=data, timeout=timeout)
             elif method.upper() == 'PUT':
                 # If data is a string, send it as raw data; otherwise send as JSON
                 if isinstance(data, str):
-                    response = requests.put(url, headers=request_headers, params=params, data=data)
+                    response = self.session.put(url, headers=request_headers, params=params, data=data, timeout=timeout)
                 else:
-                    response = requests.put(url, headers=request_headers, params=params, json=data)
+                    response = self.session.put(url, headers=request_headers, params=params, json=data, timeout=timeout)
             elif method.upper() == 'PATCH':
                 # If data is a string, send it as raw data; otherwise send as JSON
                 if isinstance(data, str):
-                    response = requests.patch(url, headers=request_headers, params=params, data=data)
+                    response = self.session.patch(url, headers=request_headers, params=params, data=data, timeout=timeout)
                 else:
-                    response = requests.patch(url, headers=request_headers, params=params, json=data)
-            elif method.upper() == 'PUT':
-                # If data is a string, send it as raw data; otherwise send as JSON
-                if isinstance(data, str):
-                    response = requests.put(url, headers=request_headers, params=params, data=data)
-                else:
-                    response = requests.put(url, headers=request_headers, params=params, json=data)
+                    response = self.session.patch(url, headers=request_headers, params=params, json=data, timeout=timeout)
+            elif method.upper() == 'DELETE':
+                response = self.session.delete(url, headers=request_headers, params=params, timeout=timeout)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -6332,8 +6421,13 @@ def main():
                        help='Harness API base URL')
     parser.add_argument('--dry-run', action='store_true',
                        help='Dry run mode: list and export resources without migrating')
+    parser.add_argument('--config', dest='config_file',
+                       help='Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)')
     
     args = parser.parse_args()
+    
+    # Load HTTP configuration from file if specified
+    http_config = HTTPConfig.from_file(args.config_file) if args.config_file else HTTPConfig()
     
     # Extract account IDs from API keys
     try:
@@ -6351,10 +6445,10 @@ def main():
             parser.error(f"Invalid destination API key: {e}")
     
     # Create API clients (account ID will be extracted from API key if not provided)
-    source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url)
+    source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url, http_config)
     dest_client = None
     if not args.dry_run:
-        dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url)
+        dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config)
     
     # Apply exclusions: remove excluded resource types from the list
     # Exclusions take precedence over inclusions

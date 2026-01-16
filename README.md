@@ -55,6 +55,7 @@ python harness_migration.py \
 - `--exclude-resource-types`: List of resource types to exclude (takes precedence over `--resource-types`)
 - `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`)
 - `--dry-run`: List and export resources without migrating
+- `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
 
 ## Usage Examples
 
@@ -103,6 +104,16 @@ python harness_migration.py \
 ```
 
 **Note**: `--exclude-resource-types` always takes precedence. If a type is in both lists, it will be excluded.
+
+### Using a Configuration File
+
+**Migrate with proxy and custom headers:**
+```bash
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --dest-api-key YOUR_DEST_API_KEY \
+  --config config.yaml
+```
 
 ### Available Resource Types
 
@@ -167,6 +178,55 @@ The following default resources are automatically skipped:
 - Connector "harnessSecretManager" (all scopes)
 - Built-in example policies and roles
 
+## HTTP Configuration
+
+The tool supports proxy servers and custom HTTP headers through a YAML configuration file. This is useful for environments behind corporate firewalls or when custom headers are required.
+
+### Setup
+
+1. Copy the example configuration file:
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
+
+2. Edit `config.yaml` with your settings
+
+3. Run the migration with the config file:
+   ```bash
+   python harness_migration.py \
+     --source-api-key YOUR_SOURCE_API_KEY \
+     --dest-api-key YOUR_DEST_API_KEY \
+     --config config.yaml
+   ```
+
+### Configuration Options
+
+```yaml
+# Proxy Configuration
+proxy:
+  http: "http://proxy.example.com:8080"    # HTTP proxy URL
+  https: "http://proxy.example.com:8080"   # HTTPS proxy URL
+  no_proxy: "localhost,127.0.0.1,.internal.company.com"  # Hosts to bypass proxy
+
+# Custom Headers (added to all API requests)
+headers:
+  X-Custom-Header: "custom-value"
+  X-Correlation-ID: "migration-job-001"
+
+# SSL/TLS Settings
+verify_ssl: true  # Set to false to disable SSL verification (not recommended)
+
+# Request Timeout (seconds)
+timeout: 30
+```
+
+### Common Use Cases
+
+- **Corporate Proxy**: Configure HTTP/HTTPS proxy for environments behind firewalls
+- **Request Tracing**: Add correlation IDs or tracing headers for debugging
+- **Authentication Proxies**: Add custom headers required by authentication proxies
+- **Self-Signed Certificates**: Disable SSL verification for internal Harness instances
+
 ## Troubleshooting
 
 ### Authentication Errors
@@ -192,3 +252,10 @@ The following default resources are automatically skipped:
 - Check the migration summary for skipped resources
 - Verify the resource type is included (not excluded)
 - Ensure the resource exists in the source account at the specified scope
+
+### Proxy/Network Issues
+
+- Verify proxy URL is correct and accessible
+- Check if proxy requires authentication (add credentials to proxy URL: `http://user:pass@proxy:8080`)
+- Ensure `no_proxy` is configured for any hosts that should bypass the proxy
+- If using self-signed certificates, set `verify_ssl: false` in your config file (not recommended for production)

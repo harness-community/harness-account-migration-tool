@@ -321,6 +321,7 @@ Dry-run mode allows testing without making changes:
 - `--resource-types`: List of resource types to migrate (default: all)
 - `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`)
 - `--dry-run`: Enable dry-run mode
+- `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
 
 ### Example Usage
 
@@ -338,7 +339,44 @@ python harness_migration.py \
   --source-api-key sat.SOURCE_ACCOUNT_ID.key \
   --dest-api-key sat.DEST_ACCOUNT_ID.key \
   --resource-types connectors pipelines
+
+# Migrate using proxy and custom headers from config file
+python harness_migration.py \
+  --source-api-key sat.SOURCE_ACCOUNT_ID.key \
+  --dest-api-key sat.DEST_ACCOUNT_ID.key \
+  --config config.yaml
 ```
+
+## HTTP Configuration
+
+The tool supports proxy servers and custom HTTP headers through a YAML configuration file. Copy `config.example.yaml` to `config.yaml` and customize as needed.
+
+### Configuration Options
+
+```yaml
+# Proxy Configuration
+proxy:
+  http: "http://proxy.example.com:8080"    # HTTP proxy URL
+  https: "http://proxy.example.com:8080"   # HTTPS proxy URL
+  no_proxy: "localhost,127.0.0.1,.internal.company.com"  # Hosts to bypass proxy
+
+# Custom Headers (added to all API requests)
+headers:
+  X-Custom-Header: "custom-value"
+  X-Correlation-ID: "migration-job-001"
+
+# SSL/TLS Settings
+verify_ssl: true  # Set to false to disable SSL verification (not recommended)
+
+# Request Timeout (seconds)
+timeout: 30
+```
+
+### Use Cases
+- **Corporate Proxy**: Configure HTTP/HTTPS proxy for environments behind corporate firewalls
+- **Request Tracing**: Add correlation IDs or tracing headers for debugging
+- **Authentication Proxies**: Add custom headers required by authentication proxies
+- **Self-Signed Certificates**: Disable SSL verification for internal Harness instances with self-signed certificates
 
 ## File Structure
 
@@ -349,6 +387,7 @@ README.md              # User documentation
 AGENTS.md              # This file (generic agent instructions)
 api-notes.md           # Detailed API endpoint information
 implementation-notes.md # Implementation-specific details and quirks
+config.example.yaml    # Example HTTP configuration file
 harness_exports/       # Directory for exported YAML files (created at runtime)
 ```
 

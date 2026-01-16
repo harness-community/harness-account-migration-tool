@@ -1,0 +1,36 @@
+# Harness Migration Tool - HTTP Configuration
+# 
+# Copy this file to 'config.yaml' and customize as needed.
+# Use with: python harness_migration.py --config config.yaml ...
+#
+# All settings are optional. If not specified, defaults will be used.
+
+# Proxy Configuration
+# Configure HTTP/HTTPS proxy servers for API requests
+proxy:
+  # HTTP proxy URL (e.g., http://proxy.example.com:8080)
+  http: ""
+  
+  # HTTPS proxy URL (e.g., http://proxy.example.com:8080)
+  https: ""
+  
+  # Comma-separated list of hosts to bypass proxy
+  # Example: "localhost,127.0.0.1,.internal.company.com,harness.io"
+  no_proxy: ""
+
+# Custom Headers
+# Add custom HTTP headers to all API requests
+# Useful for authentication through corporate proxies, request tracing, etc.
+headers:
+  # Example headers (uncomment and customize as needed):
+  # X-Custom-Header: "custom-value"
+  # X-Correlation-ID: "migration-job-001"
+  # X-Forwarded-For: "10.0.0.1"
+
+# SSL/TLS Settings
+# Set to false to disable SSL certificate verification (not recommended for production)
+verify_ssl: true
+
+# Request Timeout
+# Timeout in seconds for HTTP requests (default: 30)
+timeout: 30
