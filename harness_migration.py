@@ -3076,8 +3076,11 @@ class HarnessAPIClient:
             return False
     
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
-                              project_identifier: Optional[str] = None) -> List[str]:
-        """Get all versions of a template"""
+                              project_identifier: Optional[str] = None) -> List[Dict]:
+        """Get all versions of a template with their metadata
+        
+        Returns list of dicts with 'versionLabel' and git details (for GitX templates)
+        """
         endpoint = "/template/api/templates/list-metadata"
         params = {
             'templateListType': 'All',
@@ -3103,20 +3106,39 @@ class HarnessAPIClient:
                 content_path='data.content'
             )
             
-            # Extract versionLabel from each template entry
+            # Return list of version metadata (including git details for GitX templates)
             version_list = []
             for template_entry in content:
                 version_label = template_entry.get('versionLabel', '')
                 if version_label:
-                    version_list.append(version_label)
+                    # Check both gitDetails and entityGitDetails (API uses different keys)
+                    git_details = template_entry.get('gitDetails', {}) or template_entry.get('entityGitDetails', {})
+                    store_type = template_entry.get('storeType', 'INLINE')
+                    # Also capture connectorRef from template entry for GitX templates
+                    connector_ref = template_entry.get('connectorRef')
+                    
+                    version_info = {
+                        'versionLabel': version_label,
+                        'gitDetails': git_details,
+                        'storeType': store_type,
+                        'connectorRef': connector_ref
+                    }
+                    version_list.append(version_info)
             return version_list
         except Exception as e:
             print(f"Failed to get template versions: {e}")
             return []
     
     def get_template_data(self, template_identifier: str, version: str,
-                         org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get template data for a specific version (for both GitX and Inline detection)"""
+                         org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                         branch: Optional[str] = None, repo_name: Optional[str] = None,
+                         load_from_fallback_branch: bool = False, silent: bool = False) -> Optional[Dict]:
+        """Get template data for a specific version (for both GitX and Inline detection)
+        
+        For GitX templates stored in non-default branches, branch and repo_name must be provided.
+        If branch is unknown, set load_from_fallback_branch=True to try loading from any branch.
+        Set silent=True to suppress error output (useful when a retry will be attempted).
+        """
         endpoint = f"/template/api/templates/{template_identifier}"
         params = {
             'versionLabel': version
@@ -3126,6 +3148,17 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
+        # For GitX templates, add branch and repo parameters
+        if branch:
+            params['branch'] = branch
+        if repo_name:
+            params['repoName'] = repo_name
+        
+        # If branch is unknown for GitX templates, try loading from fallback branch
+        if load_from_fallback_branch:
+            params['loadFromFallbackBranch'] = 'true'
+            params['getDefaultFromOtherRepo'] = 'true'
+        
         response = self._make_request('GET', endpoint, params=params)
         
         if response.status_code == 200:
@@ -3134,7 +3167,8 @@ class HarnessAPIClient:
             template_data = data.get('data', {}).get('template', data.get('data', {}))
             return template_data
         else:
-            print(f"Failed to get template data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get template data: {response.status_code} - {response.text}")
             return None
     
     def get_template_yaml(self, template_identifier: str, version: str,
@@ -3148,8 +3182,11 @@ class HarnessAPIClient:
     
     def create_template(self, yaml_content: str, identifier: str, name: str, version: str,
                        org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
-                       tags: Optional[Dict[str, str]] = None) -> bool:
-        """Create template from YAML content (for inline resources)"""
+                       tags: Optional[Dict[str, str]] = None) -> str:
+        """Create template from YAML content (for inline resources)
+        
+        Returns: "success", "skipped" (already exists), or "failed"
+        """
         endpoint = "/template/api/templates"
         params = {
             'isNewTemplate': 'false',
@@ -3171,20 +3208,24 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully created template version {version}")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message(f'template version {version}', identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to create template version {version}: {response.status_code} - {response.text}")
-            return False
+            return "failed"
     
     def import_template_yaml(self, git_details: Dict, template_identifier: str, version: str,
                             template_name: str, template_description: Optional[str] = None,
                             org_identifier: Optional[str] = None,
-                            project_identifier: Optional[str] = None) -> bool:
-        """Import template from Git location (for GitX resources only)"""
+                            project_identifier: Optional[str] = None) -> str:
+        """Import template from Git location (for GitX resources only)
+        
+        Returns: "success", "skipped" (already exists), or "failed"
+        """
         endpoint = f"/template/api/templates/import/{template_identifier}"
         params = {}
         if org_identifier:
@@ -3218,14 +3259,15 @@ class HarnessAPIClient:
         
         if response.status_code in [200, 201]:
             print(f"Successfully imported template version {version} from GitX")
-            return True
+            return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
                 scope_info = get_scope_info(org_identifier, project_identifier)
                 print(f"  {format_resource_already_exists_message(f'template version {version}', template_identifier, response.text, scope_info)}")
+                return "skipped"
             else:
                 print(f"Failed to import template version {version} from GitX: {response.status_code} - {response.text}")
-            return False
+            return "failed"
 
 
 class HarnessMigrator:
@@ -5756,8 +5798,8 @@ class HarnessMigrator:
     def _migrate_template_version(self, template_identifier: str, template_name: str, version: str,
                                  template_data: Dict, org_id: Optional[str], project_id: Optional[str],
                                  scope_suffix: str) -> Dict[str, int]:
-        """Migrate a single template version - returns success/failed counts"""
-        version_results = {'success': 0, 'failed': 0}
+        """Migrate a single template version - returns success/failed/skipped counts"""
+        version_results = {'success': 0, 'failed': 0, 'skipped': 0}
         
         # Detect if template is GitX or Inline
         is_gitx = self.source_client.is_gitx_resource(template_data)
@@ -5807,12 +5849,15 @@ class HarnessMigrator:
                 # GitX: Use import endpoint with git details
                 # Extract template description from template data
                 template_description = template_data.get('description') or template_data.get('templateDescription')
-                if self.dest_client.import_template_yaml(
+                result = self.dest_client.import_template_yaml(
                     git_details=git_details, template_identifier=template_identifier, version=version,
                     template_name=template_name, template_description=template_description,
                     org_identifier=org_id, project_identifier=project_id
-                ):
+                )
+                if result == "success":
                     version_results['success'] += 1
+                elif result == "skipped":
+                    version_results['skipped'] += 1
                 else:
                     version_results['failed'] += 1
             else:
@@ -5828,11 +5873,14 @@ class HarnessMigrator:
                     except Exception as e:
                         print(f"    Warning: Failed to parse YAML for tags: {e}")
                 
-                if self.dest_client.create_template(
+                result = self.dest_client.create_template(
                     yaml_content=yaml_content, identifier=template_identifier, name=template_name, version=version,
                     org_identifier=org_id, project_identifier=project_id, tags=tags
-                ):
+                )
+                if result == "success":
                     version_results['success'] += 1
+                elif result == "skipped":
+                    version_results['skipped'] += 1
                 else:
                     version_results['failed'] += 1
         
@@ -5891,24 +5939,43 @@ class HarnessMigrator:
                         name = template_item.get('name', identifier)
                         print(f"\nProcessing {template_type} template: {name} ({identifier}) at {scope_label}")
                         
-                        # Get all versions for this template
-                        versions = self.source_client.get_template_versions(identifier, org_id, project_id)
+                        # Get all versions for this template (with git metadata)
+                        version_metadata_list = self.source_client.get_template_versions(identifier, org_id, project_id)
                         
-                        if not versions:
+                        if not version_metadata_list:
                             print(f"  No versions found for template {name}")
                             results['skipped'] += 1
                             continue
                         
-                        print(f"  Found {len(versions)} version(s): {', '.join(versions)}")
+                        version_labels = [v.get('versionLabel', '') for v in version_metadata_list]
+                        print(f"  Found {len(version_metadata_list)} version(s): {', '.join(version_labels)}")
                         
                         # Migrate each version
-                        for version in versions:
+                        for version_meta in version_metadata_list:
+                            version = version_meta.get('versionLabel', '')
+                            git_details = version_meta.get('gitDetails', {})
+                            store_type = version_meta.get('storeType', 'INLINE')
+                            branch = git_details.get('branch') if git_details else None
+                            repo_name = git_details.get('repoName') if git_details else None
+                            
                             print(f"\n  Processing version: {version}")
                             
                             # Get template data for this version to detect storage type
+                            # Pass branch and repo_name for GitX templates on non-default branches
+                            # Use silent=True if a retry might happen (GitX without branch info)
+                            might_retry = store_type != 'INLINE' and not branch
                             template_data = self.source_client.get_template_data(
-                                identifier, version, org_id, project_id
+                                identifier, version, org_id, project_id,
+                                branch=branch, repo_name=repo_name,
+                                silent=might_retry
                             )
+                            
+                            # If no data and it's a GitX template without branch info, try loadFromFallbackBranch
+                            if not template_data and might_retry:
+                                template_data = self.source_client.get_template_data(
+                                    identifier, version, org_id, project_id,
+                                    repo_name=repo_name, load_from_fallback_branch=True
+                                )
                             
                             if not template_data:
                                 print(f"    Failed to get data for template {name} version {version}")
@@ -5921,6 +5988,7 @@ class HarnessMigrator:
                             )
                             results['success'] += version_results['success']
                             results['failed'] += version_results['failed']
+                            results['skipped'] += version_results.get('skipped', 0)
             
             # Then migrate other template types (not in the ordered list)
             other_types = [t for t in templates_by_type.keys() if t not in template_type_order]
@@ -5932,24 +6000,43 @@ class HarnessMigrator:
                         name = template_item.get('name', identifier)
                         print(f"\nProcessing {template_type} template: {name} ({identifier}) at {scope_label}")
                         
-                        # Get all versions for this template
-                        versions = self.source_client.get_template_versions(identifier, org_id, project_id)
+                        # Get all versions for this template (with git metadata)
+                        version_metadata_list = self.source_client.get_template_versions(identifier, org_id, project_id)
                         
-                        if not versions:
+                        if not version_metadata_list:
                             print(f"  No versions found for template {name}")
                             results['skipped'] += 1
                             continue
                         
-                        print(f"  Found {len(versions)} version(s): {', '.join(versions)}")
+                        version_labels = [v.get('versionLabel', '') for v in version_metadata_list]
+                        print(f"  Found {len(version_metadata_list)} version(s): {', '.join(version_labels)}")
                         
                         # Migrate each version
-                        for version in versions:
+                        for version_meta in version_metadata_list:
+                            version = version_meta.get('versionLabel', '')
+                            git_details = version_meta.get('gitDetails', {})
+                            store_type = version_meta.get('storeType', 'INLINE')
+                            branch = git_details.get('branch') if git_details else None
+                            repo_name = git_details.get('repoName') if git_details else None
+                            
                             print(f"\n  Processing version: {version}")
                             
                             # Get template data for this version to detect storage type
+                            # Pass branch and repo_name for GitX templates on non-default branches
+                            # Use silent=True if a retry might happen (GitX without branch info)
+                            might_retry = store_type != 'INLINE' and not branch
                             template_data = self.source_client.get_template_data(
-                                identifier, version, org_id, project_id
+                                identifier, version, org_id, project_id,
+                                branch=branch, repo_name=repo_name,
+                                silent=might_retry
                             )
+                            
+                            # If no data and it's a GitX template without branch info, try loadFromFallbackBranch
+                            if not template_data and might_retry:
+                                template_data = self.source_client.get_template_data(
+                                    identifier, version, org_id, project_id,
+                                    repo_name=repo_name, load_from_fallback_branch=True
+                                )
                             
                             if not template_data:
                                 print(f"    Failed to get data for template {name} version {version}")
@@ -5962,6 +6049,7 @@ class HarnessMigrator:
                             )
                             results['success'] += version_results['success']
                             results['failed'] += version_results['failed']
+                            results['skipped'] += version_results.get('skipped', 0)
         
         return results
     
@@ -6193,6 +6281,7 @@ def main():
     
     total_success = sum(r['success'] for r in results.values())
     total_failed = sum(r['failed'] for r in results.values())
+    total_skipped = sum(r['skipped'] for r in results.values())
     
     print(f"\nTOTAL:")
     if args.dry_run:
@@ -6200,6 +6289,7 @@ def main():
     else:
         print(f"  Success: {total_success}")
     print(f"  Failed: {total_failed}")
+    print(f"  Skipped: {total_skipped}")
     print(f"\nExported YAML files saved to: {migrator.export_dir.absolute()}")
 
 
