@@ -216,6 +216,9 @@ headers:
 # SSL/TLS Settings
 verify_ssl: true  # Set to false to disable SSL verification (not recommended)
 
+# Custom SSL CA Certificate (path to PEM file)
+ssl_ca_cert: "/path/to/ca-bundle.crt"  # Takes precedence over verify_ssl if set
+
 # Request Timeout (seconds)
 timeout: 30
 ```
@@ -225,7 +228,8 @@ timeout: 30
 - **Corporate Proxy**: Configure HTTP/HTTPS proxy for environments behind firewalls
 - **Request Tracing**: Add correlation IDs or tracing headers for debugging
 - **Authentication Proxies**: Add custom headers required by authentication proxies
-- **Self-Signed Certificates**: Disable SSL verification for internal Harness instances
+- **Custom CA Certificates**: Use custom CA bundle for internal/private certificate authorities
+- **Self-Signed Certificates**: Disable SSL verification for development environments (not recommended for production)
 
 ## Troubleshooting
 
@@ -258,4 +262,10 @@ timeout: 30
 - Verify proxy URL is correct and accessible
 - Check if proxy requires authentication (add credentials to proxy URL: `http://user:pass@proxy:8080`)
 - Ensure `no_proxy` is configured for any hosts that should bypass the proxy
-- If using self-signed certificates, set `verify_ssl: false` in your config file (not recommended for production)
+
+### SSL Certificate Issues
+
+- **Custom CA**: If your organization uses a private CA, set `ssl_ca_cert` to your CA bundle file path
+- **Certificate errors**: Ensure the CA bundle includes all certificates in the chain (root and intermediate)
+- **Self-signed certificates**: As a last resort, set `verify_ssl: false` (not recommended for production)
+- **Bundle format**: The CA certificate file should be in PEM format

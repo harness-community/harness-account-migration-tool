@@ -25,7 +25,20 @@ class HTTPConfig:
     proxies: Dict[str, str] = field(default_factory=dict)
     custom_headers: Dict[str, str] = field(default_factory=dict)
     verify_ssl: bool = True
+    ssl_ca_cert: Optional[str] = None  # Path to custom CA certificate bundle
     timeout: int = 30
+    
+    @property
+    def ssl_verify(self) -> Union[bool, str]:
+        """Get the SSL verification setting for requests.
+        
+        Returns:
+            - Path to CA bundle if ssl_ca_cert is set
+            - True/False based on verify_ssl otherwise
+        """
+        if self.ssl_ca_cert:
+            return self.ssl_ca_cert
+        return self.verify_ssl
     
     @classmethod
     def from_file(cls, config_path: str) -> 'HTTPConfig':
@@ -68,6 +81,14 @@ class HTTPConfig:
             if 'verify_ssl' in file_config:
                 config.verify_ssl = file_config['verify_ssl']
             
+            # Load custom SSL CA certificate path
+            if 'ssl_ca_cert' in file_config and file_config['ssl_ca_cert']:
+                cert_path = Path(file_config['ssl_ca_cert'])
+                if cert_path.exists():
+                    config.ssl_ca_cert = str(cert_path.absolute())
+                else:
+                    print(f"Warning: SSL CA certificate file not found: {file_config['ssl_ca_cert']}")
+            
             # Load timeout setting
             if 'timeout' in file_config:
                 config.timeout = file_config['timeout']
@@ -77,7 +98,9 @@ class HTTPConfig:
                 print(f"  Proxy configured: {list(config.proxies.keys())}")
             if config.custom_headers:
                 print(f"  Custom headers: {list(config.custom_headers.keys())}")
-            if not config.verify_ssl:
+            if config.ssl_ca_cert:
+                print(f"  Custom SSL CA certificate: {config.ssl_ca_cert}")
+            elif not config.verify_ssl:
                 print(f"  SSL verification: disabled")
             
             return config
@@ -219,8 +242,8 @@ class HarnessAPIClient:
         if self.http_config.proxies:
             self.session.proxies.update(self.http_config.proxies)
         
-        # Configure SSL verification
-        self.session.verify = self.http_config.verify_ssl
+        # Configure SSL verification (can be True, False, or path to CA bundle)
+        self.session.verify = self.http_config.ssl_verify
     
     def _make_request(self, method: str, endpoint: str, data: Optional[Union[Dict, str]] = None, 
                      params: Optional[Dict] = None, headers: Optional[Dict] = None) -> requests.Response:

@@ -368,6 +368,9 @@ headers:
 # SSL/TLS Settings
 verify_ssl: true  # Set to false to disable SSL verification (not recommended)
 
+# Custom SSL CA Certificate (path to PEM file)
+ssl_ca_cert: "/path/to/ca-bundle.crt"  # Takes precedence over verify_ssl if set
+
 # Request Timeout (seconds)
 timeout: 30
 ```
@@ -376,7 +379,8 @@ timeout: 30
 - **Corporate Proxy**: Configure HTTP/HTTPS proxy for environments behind corporate firewalls
 - **Request Tracing**: Add correlation IDs or tracing headers for debugging
 - **Authentication Proxies**: Add custom headers required by authentication proxies
-- **Self-Signed Certificates**: Disable SSL verification for internal Harness instances with self-signed certificates
+- **Custom CA Certificates**: Use custom CA bundle for internal/private certificate authorities
+- **Self-Signed Certificates**: Disable SSL verification for internal Harness instances (not recommended for production)
 
 ## File Structure
 

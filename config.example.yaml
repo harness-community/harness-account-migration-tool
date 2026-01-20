@@ -31,6 +31,14 @@ headers:
 # Set to false to disable SSL certificate verification (not recommended for production)
 verify_ssl: true
 
+# Custom SSL CA Certificate
+# Path to a custom CA certificate bundle file (PEM format)
+# Use this when connecting through corporate proxies or to internal Harness instances
+# with certificates signed by a private/internal CA
+# If set, this takes precedence over verify_ssl
+# Example: "/etc/ssl/certs/corporate-ca-bundle.crt"
+ssl_ca_cert: ""
+
 # Request Timeout
 # Timeout in seconds for HTTP requests (default: 30)
 timeout: 30
