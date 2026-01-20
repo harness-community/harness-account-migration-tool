@@ -3423,6 +3423,25 @@ class HarnessMigrator:
         self.export_dir = Path("harness_exports")
         self.export_dir.mkdir(exist_ok=True)
     
+    def _init_results(self) -> Dict[str, Any]:
+        """Initialize a results dictionary with skipped_ids tracking"""
+        return {'success': 0, 'failed': 0, 'skipped': 0, 'skipped_ids': []}
+    
+    def _add_skipped(self, results: Dict[str, Any], identifier: str, scope_label: str = None) -> None:
+        """Add a skipped entity to the results"""
+        results['skipped'] += 1
+        # Format identifier with scope if provided
+        if scope_label:
+            results['skipped_ids'].append(f"{identifier} ({scope_label})")
+        else:
+            results['skipped_ids'].append(identifier)
+    
+    def _print_skipped_summary(self, results: Dict[str, Any], resource_type: str) -> None:
+        """Print summary of skipped entity IDs if any were skipped"""
+        skipped_ids = results.get('skipped_ids', [])
+        if skipped_ids:
+            print(f"\n  Skipped {resource_type} identifiers ({len(skipped_ids)}): {', '.join(skipped_ids)}")
+    
     def _get_project_scopes(self) -> List[tuple]:
         """Get only project-level scopes (org_id, project_id) where both are not None"""
         scopes = []
@@ -3476,7 +3495,7 @@ class HarnessMigrator:
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Organizations ===")
         organizations = self.source_client.list_organizations()
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         for org in organizations:
             org_data = org.get('organization', '')
@@ -3486,7 +3505,7 @@ class HarnessMigrator:
             # Skip default organization
             if self._is_default_organization(identifier):
                 print(f"\nSkipping default organization: {name} ({identifier})")
-                results['skipped'] += 1
+                self._add_skipped(results, identifier)
                 continue
             
             print(f"\nProcessing organization: {name} ({identifier})")
@@ -3514,7 +3533,7 @@ class HarnessMigrator:
                 if result == "success" or result == True:
                     results['success'] += 1
                 elif result == "skipped":
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier)
                 else:
                     results['failed'] += 1
             else:
@@ -3523,6 +3542,7 @@ class HarnessMigrator:
             
             time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'organization')
         return results
     
     def migrate_projects(self) -> Dict[str, Any]:
@@ -3533,7 +3553,7 @@ class HarnessMigrator:
         # List all projects across all organizations (API fetches all when no org_identifier is provided)
         projects = self.source_client.list_projects()
         
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         for project in projects:
             # Extract project data from the response structure
@@ -3545,7 +3565,7 @@ class HarnessMigrator:
             # Skip default project
             if self._is_default_project(identifier):
                 print(f"\nSkipping default project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
-                results['skipped'] += 1
+                self._add_skipped(results, identifier, f"org {org_id}" if org_id else None)
                 continue
             
             print(f"\nProcessing project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
@@ -3577,7 +3597,7 @@ class HarnessMigrator:
                 if result == "success" or result == True:
                     results['success'] += 1
                 elif result == "skipped":
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier, f"org {org_id}" if org_id else None)
                 else:
                     results['failed'] += 1
             else:
@@ -3586,6 +3606,7 @@ class HarnessMigrator:
             
             time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'project')
         return results
     
     def _is_default_organization(self, org_identifier: str) -> bool:
@@ -3665,7 +3686,7 @@ class HarnessMigrator:
         """Migrate custom secret manager connectors at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Custom Secret Manager Connectors ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -3685,7 +3706,7 @@ class HarnessMigrator:
                 
                 # Skip default connectors
                 if self._is_default_connector(identifier, org_id, project_id):
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier, scope_label)
                     continue
                 
                 name = connector_data.get('name', identifier)
@@ -3717,19 +3738,20 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'custom secret manager connector')
         return results
     
     def migrate_secret_manager_connectors(self) -> Dict[str, Any]:
         """Migrate secret manager connectors at all scopes (account, org, project) - excludes custom secret manager"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Secret Manager Connectors ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -3749,7 +3771,7 @@ class HarnessMigrator:
                 
                 # Skip default connectors
                 if self._is_default_connector(identifier, org_id, project_id):
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier, scope_label)
                     continue
                 
                 name = connector_data.get('name', identifier)
@@ -3781,19 +3803,20 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'secret manager connector')
         return results
     
     def migrate_connectors(self) -> Dict[str, Any]:
         """Migrate connectors at all scopes (account, org, project), excluding custom secret manager connectors and secret manager connectors"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Connectors ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -3817,7 +3840,7 @@ class HarnessMigrator:
                 
                 # Skip default connectors
                 if self._is_default_connector(identifier, org_id, project_id):
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier, scope_label)
                     continue
                 
                 name = connector_data.get('name', identifier)
@@ -3849,12 +3872,13 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'connector')
         return results
     
     def _is_harness_secret_manager_secret(self, secret_data: Dict) -> bool:
@@ -3871,7 +3895,7 @@ class HarnessMigrator:
         """Migrate secrets stored in harnessSecretManager at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Secrets (harnessSecretManager) ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -3930,19 +3954,20 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'harnessSecretManager secret')
         return results
     
     def migrate_secrets(self) -> Dict[str, Any]:
         """Migrate secrets at all scopes (account, org, project), excluding harnessSecretManager secrets"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Secrets ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -4002,19 +4027,20 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'secret')
         return results
     
     def migrate_environments(self) -> Dict[str, Any]:
         """Migrate environments at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Environments ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -4094,7 +4120,7 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                     else:
@@ -4107,19 +4133,20 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'environment')
         return results
     
     def migrate_infrastructures(self) -> Dict[str, Any]:
         """Migrate infrastructures at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Infrastructures ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -4224,7 +4251,7 @@ class HarnessMigrator:
                             if result == "success" or result == True:
                                 results['success'] += 1
                             elif result == "skipped":
-                                results['skipped'] += 1
+                                self._add_skipped(results, identifier, scope_label)
                             else:
                                 results['failed'] += 1
                         else:
@@ -4236,19 +4263,20 @@ class HarnessMigrator:
                             if result == "success" or result == True:
                                 results['success'] += 1
                             elif result == "skipped":
-                                results['skipped'] += 1
+                                self._add_skipped(results, identifier, scope_label)
                             else:
                                 results['failed'] += 1
                     
                     time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'infrastructure')
         return results
     
     def migrate_services(self) -> Dict[str, Any]:
         """Migrate services at all scopes (account, org, project)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Services ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -4328,7 +4356,7 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                     else:
@@ -4340,12 +4368,13 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'service')
         return results
     
     def migrate_overrides(self) -> Dict[str, Any]:
@@ -4356,7 +4385,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Overrides ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -4474,7 +4503,7 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                     else:
@@ -4487,19 +4516,20 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'override')
         return results
     
     def migrate_user_journeys(self) -> Dict[str, Any]:
         """Migrate user journeys at project level (required before SLOs)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} User Journeys ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # User journeys are project-level only
         scopes = self._get_project_scopes()
@@ -4555,19 +4585,20 @@ class HarnessMigrator:
                         print(f"  Successfully created user journey")
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'user journey')
         return results
     
     def migrate_monitored_services(self) -> Dict[str, Any]:
         """Migrate monitored services at project level (requires services and environments)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Monitored Services ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # Monitored services are project-level only
         scopes = self._get_project_scopes()
@@ -4591,7 +4622,7 @@ class HarnessMigrator:
                 
                 if not identifier:
                     print(f"  Skipping monitored service without identifier")
-                    results['skipped'] += 1
+                    self._add_skipped(results, "unknown", scope_label)
                     continue
                 
                 print(f"\nProcessing monitored service: {name} ({identifier}) at {scope_label}")
@@ -4655,12 +4686,13 @@ class HarnessMigrator:
                                 print(f"  Warning: Monitored service created but failed to add health sources")
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'monitored service')
         return results
     
     def migrate_slo_notification_rules(self) -> Dict[str, Any]:
@@ -4671,7 +4703,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} SLO Notification Rules ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # SLO notification rules are project-level only
         scopes = self._get_project_scopes()
@@ -4695,7 +4727,7 @@ class HarnessMigrator:
                 
                 if not identifier:
                     print(f"  Skipping SLO notification rule without identifier")
-                    results['skipped'] += 1
+                    self._add_skipped(results, "unknown", scope_label)
                     continue
                 
                 print(f"\nProcessing SLO notification rule: {name} ({identifier}) at {scope_label}")
@@ -4732,12 +4764,13 @@ class HarnessMigrator:
                         print(f"  Successfully created SLO notification rule")
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'SLO notification rule')
         return results
     
     def migrate_slos(self) -> Dict[str, Any]:
@@ -4749,7 +4782,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} SLOs ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # SLOs are project-level only
         scopes = self._get_project_scopes()
@@ -4772,7 +4805,7 @@ class HarnessMigrator:
                 
                 if not identifier:
                     print(f"  Skipping SLO without identifier")
-                    results['skipped'] += 1
+                    self._add_skipped(results, "unknown", scope_label)
                     continue
                 
                 print(f"\nProcessing SLO: {name} ({identifier}) at {scope_label}")
@@ -4833,12 +4866,13 @@ class HarnessMigrator:
                         print(f"  Successfully created SLO")
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'SLO')
         return results
     
     def migrate_webhooks(self) -> Dict[str, Any]:
@@ -4850,7 +4884,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Webhooks ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # Webhooks are account-level only (no org/project scope based on examples)
         # But we'll still iterate through scopes in case they support it
@@ -4911,12 +4945,13 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'webhook')
         return results
     
     def migrate_policies(self) -> Dict[str, Any]:
@@ -4928,7 +4963,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Policies ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -5007,7 +5042,7 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
@@ -5017,6 +5052,7 @@ class HarnessMigrator:
             if builtin_count > 0:
                 print(f"  Skipped {builtin_count} built-in example policy(ies) at {scope_label}")
         
+        self._print_skipped_summary(results, 'policy')
         return results
     
     def migrate_policy_sets(self) -> Dict[str, Any]:
@@ -5028,7 +5064,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Policy Sets ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -5086,12 +5122,13 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'policy set')
         return results
     
     def migrate_roles(self) -> Dict[str, Any]:
@@ -5103,7 +5140,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Roles ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -5173,7 +5210,7 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
@@ -5183,6 +5220,7 @@ class HarnessMigrator:
             if builtin_count > 0:
                 print(f"  Skipped {builtin_count} built-in role(s) at {scope_label}")
         
+        self._print_skipped_summary(results, 'role')
         return results
     
     def migrate_resource_groups(self) -> Dict[str, Any]:
@@ -5194,7 +5232,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Resource Groups ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -5213,7 +5251,7 @@ class HarnessMigrator:
                 # Skip built-in resource groups (IDs starting with "_")
                 if self._is_builtin_resource_group(identifier):
                     print(f"\nSkipping built-in resource group: {name} ({identifier})")
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier, scope_label)
                     continue
                 
                 print(f"\nProcessing resource group: {name} ({identifier}) at {scope_label}")
@@ -5260,12 +5298,13 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'resource group')
         return results
     
     def migrate_settings(self) -> Dict[str, Any]:
@@ -5278,7 +5317,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Settings ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # Available settings categories (from Harness API)
         # Not all categories may be available depending on which Harness modules are enabled
@@ -5376,6 +5415,7 @@ class HarnessMigrator:
                     print(f"  Skipping category {category} due to error: {e}")
                     continue
         
+        self._print_skipped_summary(results, 'setting')
         return results
     
     def migrate_ip_allowlists(self) -> Dict[str, Any]:
@@ -5387,7 +5427,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} IP Allowlists ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         print(f"\n--- Processing IP allowlists at account level ---")
         
@@ -5436,12 +5476,13 @@ class HarnessMigrator:
                 if result == "success" or result == True:
                     results['success'] += 1
                 elif result == "skipped":
-                    results['skipped'] += 1
+                    self._add_skipped(results, identifier, "account level")
                 else:
                     results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'IP allowlist')
         return results
     
     def migrate_users(self) -> Dict[str, Any]:
@@ -5453,7 +5494,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Users ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -5477,7 +5518,7 @@ class HarnessMigrator:
                 
                 if not email:
                     print(f"  Skipping user without email")
-                    results['skipped'] += 1
+                    self._add_skipped(results, "unknown", scope_label)
                     continue
                 
                 print(f"\nProcessing user: {name} ({email}) at {scope_label}")
@@ -5514,12 +5555,13 @@ class HarnessMigrator:
                     if result == "success" or result == True:
                         results['success'] += 1
                     elif result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, email, scope_label)
                     else:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'user')
         return results
     
     def migrate_service_accounts(self) -> Dict[str, Any]:
@@ -5531,7 +5573,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Service Accounts ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_all_scopes()
         for org_id, project_id in scopes:
@@ -5555,7 +5597,7 @@ class HarnessMigrator:
                 
                 if not identifier:
                     print(f"  Skipping service account without identifier")
-                    results['skipped'] += 1
+                    self._add_skipped(results, "unknown", scope_label)
                     continue
                 
                 print(f"\nProcessing service account: {name} ({identifier}) at {scope_label}")
@@ -5611,7 +5653,7 @@ class HarnessMigrator:
                         project_identifier=project_id
                     )
                     if result == "skipped":
-                        results['skipped'] += 1
+                        self._add_skipped(results, identifier, scope_label)
                         continue
                     elif result != "success" and result != True:
                         results['failed'] += 1
@@ -5682,13 +5724,14 @@ class HarnessMigrator:
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'service account')
         return results
     
     def migrate_pipelines(self) -> Dict[str, Any]:
         """Migrate pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Pipelines ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_project_scopes()
         for org_id, project_id in scopes:
@@ -5772,7 +5815,7 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                     else:
@@ -5795,19 +5838,20 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'pipeline')
         return results
     
     def migrate_input_sets(self) -> Dict[str, Any]:
         """Migrate input sets for all pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Input Sets ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_project_scopes()
         for org_id, project_id in scopes:
@@ -5916,7 +5960,7 @@ class HarnessMigrator:
                             if result == "success" or result == True:
                                 results['success'] += 1
                             elif result == "skipped":
-                                results['skipped'] += 1
+                                self._add_skipped(results, identifier, scope_label)
                             else:
                                 results['failed'] += 1
                         else:
@@ -5943,19 +5987,20 @@ class HarnessMigrator:
                             if result == "success" or result == True:
                                 results['success'] += 1
                             elif result == "skipped":
-                                results['skipped'] += 1
+                                self._add_skipped(results, identifier, scope_label)
                             else:
                                 results['failed'] += 1
                     
                     time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'input set')
         return results
     
     def migrate_triggers(self) -> Dict[str, Any]:
         """Migrate triggers for all pipelines at project level only (pipelines only exist at project level)"""
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Triggers ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         scopes = self._get_project_scopes()
         for org_id, project_id in scopes:
@@ -6023,19 +6068,20 @@ class HarnessMigrator:
                         if result == "success" or result == True:
                             results['success'] += 1
                         elif result == "skipped":
-                            results['skipped'] += 1
+                            self._add_skipped(results, identifier, scope_label)
                         else:
                             results['failed'] += 1
                     
                     time.sleep(0.5)  # Rate limiting
         
+        self._print_skipped_summary(results, 'trigger')
         return results
     
     def _migrate_template_version(self, template_identifier: str, template_name: str, version: str,
                                  template_data: Dict, org_id: Optional[str], project_id: Optional[str],
-                                 scope_suffix: str) -> Dict[str, int]:
-        """Migrate a single template version - returns success/failed/skipped counts"""
-        version_results = {'success': 0, 'failed': 0, 'skipped': 0}
+                                 scope_suffix: str) -> Dict[str, Any]:
+        """Migrate a single template version - returns success/failed/skipped counts and skipped_ids"""
+        version_results = {'success': 0, 'failed': 0, 'skipped': 0, 'skipped_ids': []}
         
         # Detect if template is GitX or Inline
         is_gitx = self.source_client.is_gitx_resource(template_data)
@@ -6094,6 +6140,8 @@ class HarnessMigrator:
                     version_results['success'] += 1
                 elif result == "skipped":
                     version_results['skipped'] += 1
+                    scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+                    version_results['skipped_ids'].append(f"{template_identifier}:v{version} ({scope_label})")
                 else:
                     version_results['failed'] += 1
             else:
@@ -6117,6 +6165,8 @@ class HarnessMigrator:
                     version_results['success'] += 1
                 elif result == "skipped":
                     version_results['skipped'] += 1
+                    scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+                    version_results['skipped_ids'].append(f"{template_identifier}:v{version} ({scope_label})")
                 else:
                     version_results['failed'] += 1
         
@@ -6133,7 +6183,7 @@ class HarnessMigrator:
         """
         action = "Listing" if self.dry_run else "Migrating"
         print(f"\n=== {action} Templates ===")
-        results = {'success': 0, 'failed': 0, 'skipped': 0}
+        results = self._init_results()
         
         # Template type migration order based on dependencies
         # SecretManager templates are handled separately (migrated early)
@@ -6286,7 +6336,10 @@ class HarnessMigrator:
                             results['success'] += version_results['success']
                             results['failed'] += version_results['failed']
                             results['skipped'] += version_results.get('skipped', 0)
+                            # Add skipped IDs (version_results already tracks them in the results from _migrate_template_version)
+                            results['skipped_ids'].extend(version_results.get('skipped_ids', []))
         
+        self._print_skipped_summary(results, 'template')
         return results
     
     def migrate_secret_manager_templates(self) -> Dict[str, Any]:
