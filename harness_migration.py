@@ -3425,10 +3425,10 @@ class HarnessMigrator:
     
     def _init_results(self) -> Dict[str, Any]:
         """Initialize a results dictionary with skipped_ids tracking"""
-        return {'success': 0, 'failed': 0, 'skipped': 0, 'skipped_ids': []}
+        return {'success': 0, 'failed': 0, 'skipped': 0, 'skipped_ids': [], 'builtin_ids': []}
     
     def _add_skipped(self, results: Dict[str, Any], identifier: str, scope_label: str = None) -> None:
-        """Add a skipped entity to the results"""
+        """Add a skipped entity to the results (for 'already exists' cases)"""
         results['skipped'] += 1
         # Format identifier with scope if provided
         if scope_label:
@@ -3436,11 +3436,23 @@ class HarnessMigrator:
         else:
             results['skipped_ids'].append(identifier)
     
+    def _add_builtin_skipped(self, results: Dict[str, Any], identifier: str, scope_label: str = None) -> None:
+        """Add a built-in/default entity to the results"""
+        results['skipped'] += 1
+        # Format identifier with scope if provided
+        if scope_label:
+            results['builtin_ids'].append(f"{identifier} ({scope_label})")
+        else:
+            results['builtin_ids'].append(identifier)
+    
     def _print_skipped_summary(self, results: Dict[str, Any], resource_type: str) -> None:
         """Print summary of skipped entity IDs if any were skipped"""
+        builtin_ids = results.get('builtin_ids', [])
         skipped_ids = results.get('skipped_ids', [])
+        if builtin_ids:
+            print(f"\n  Skipped built-in {resource_type} identifiers ({len(builtin_ids)}): {', '.join(builtin_ids)}")
         if skipped_ids:
-            print(f"\n  Skipped {resource_type} identifiers ({len(skipped_ids)}): {', '.join(skipped_ids)}")
+            print(f"\n  Skipped (already exists) {resource_type} identifiers ({len(skipped_ids)}): {', '.join(skipped_ids)}")
     
     def _get_project_scopes(self) -> List[tuple]:
         """Get only project-level scopes (org_id, project_id) where both are not None"""
@@ -3505,7 +3517,7 @@ class HarnessMigrator:
             # Skip default organization
             if self._is_default_organization(identifier):
                 print(f"\nSkipping default organization: {name} ({identifier})")
-                self._add_skipped(results, identifier)
+                self._add_builtin_skipped(results, identifier)
                 continue
             
             print(f"\nProcessing organization: {name} ({identifier})")
@@ -3565,7 +3577,7 @@ class HarnessMigrator:
             # Skip default project
             if self._is_default_project(identifier):
                 print(f"\nSkipping default project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
-                self._add_skipped(results, identifier, f"org {org_id}" if org_id else None)
+                self._add_builtin_skipped(results, identifier, f"org {org_id}" if org_id else None)
                 continue
             
             print(f"\nProcessing project: {name} ({identifier})" + (f" in org {org_id}" if org_id else ""))
@@ -3706,7 +3718,7 @@ class HarnessMigrator:
                 
                 # Skip default connectors
                 if self._is_default_connector(identifier, org_id, project_id):
-                    self._add_skipped(results, identifier, scope_label)
+                    self._add_builtin_skipped(results, identifier, scope_label)
                     continue
                 
                 name = connector_data.get('name', identifier)
@@ -3771,7 +3783,7 @@ class HarnessMigrator:
                 
                 # Skip default connectors
                 if self._is_default_connector(identifier, org_id, project_id):
-                    self._add_skipped(results, identifier, scope_label)
+                    self._add_builtin_skipped(results, identifier, scope_label)
                     continue
                 
                 name = connector_data.get('name', identifier)
@@ -3840,7 +3852,7 @@ class HarnessMigrator:
                 
                 # Skip default connectors
                 if self._is_default_connector(identifier, org_id, project_id):
-                    self._add_skipped(results, identifier, scope_label)
+                    self._add_builtin_skipped(results, identifier, scope_label)
                     continue
                 
                 name = connector_data.get('name', identifier)
@@ -4972,18 +4984,14 @@ class HarnessMigrator:
             
             policies = self.source_client.list_policies(org_id, project_id)
             
-            # Count built-in policies to summarize at end
-            builtin_count = 0
-            
             for policy in policies:
                 # Policy data is directly in the list response (not nested)
                 identifier = policy.get('identifier', '')
                 name = policy.get('name', identifier)
                 
-                # Skip built-in example policies (count but don't print each one)
+                # Skip built-in example policies (track in builtin_ids)
                 if self._is_builtin_example_policy(identifier):
-                    builtin_count += 1
-                    results['skipped'] += 1
+                    self._add_builtin_skipped(results, identifier, scope_label)
                     continue
                 
                 print(f"\nProcessing policy: {name} ({identifier}) at {scope_label}")
@@ -5047,10 +5055,6 @@ class HarnessMigrator:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
-            
-            # Print summary of skipped built-in policies for this scope
-            if builtin_count > 0:
-                print(f"  Skipped {builtin_count} built-in example policy(ies) at {scope_label}")
         
         self._print_skipped_summary(results, 'policy')
         return results
@@ -5149,9 +5153,6 @@ class HarnessMigrator:
             
             roles = self.source_client.list_roles(org_id, project_id)
             
-            # Count built-in roles silently
-            builtin_count = 0
-            
             for role in roles:
                 # Role data is already extracted from 'role' key in list_roles
                 # But handle both cases (nested or direct) - list_roles already extracts it
@@ -5162,8 +5163,7 @@ class HarnessMigrator:
                 
                 # Skip built-in roles (IDs starting with "_")
                 if self._is_builtin_role(identifier):
-                    builtin_count += 1
-                    results['skipped'] += 1
+                    self._add_builtin_skipped(results, identifier, scope_label)
                     continue
                 
                 print(f"\nProcessing role: {name} ({identifier}) at {scope_label}")
@@ -5215,10 +5215,6 @@ class HarnessMigrator:
                         results['failed'] += 1
                 
                 time.sleep(0.5)  # Rate limiting
-            
-            # Print summary of skipped built-in roles for this scope
-            if builtin_count > 0:
-                print(f"  Skipped {builtin_count} built-in role(s) at {scope_label}")
         
         self._print_skipped_summary(results, 'role')
         return results
@@ -5250,8 +5246,7 @@ class HarnessMigrator:
                 
                 # Skip built-in resource groups (IDs starting with "_")
                 if self._is_builtin_resource_group(identifier):
-                    print(f"\nSkipping built-in resource group: {name} ({identifier})")
-                    self._add_skipped(results, identifier, scope_label)
+                    self._add_builtin_skipped(results, identifier, scope_label)
                     continue
                 
                 print(f"\nProcessing resource group: {name} ({identifier}) at {scope_label}")
@@ -6081,7 +6076,7 @@ class HarnessMigrator:
                                  template_data: Dict, org_id: Optional[str], project_id: Optional[str],
                                  scope_suffix: str) -> Dict[str, Any]:
         """Migrate a single template version - returns success/failed/skipped counts and skipped_ids"""
-        version_results = {'success': 0, 'failed': 0, 'skipped': 0, 'skipped_ids': []}
+        version_results = {'success': 0, 'failed': 0, 'skipped': 0, 'skipped_ids': [], 'builtin_ids': []}
         
         # Detect if template is GitX or Inline
         is_gitx = self.source_client.is_gitx_resource(template_data)
@@ -6338,6 +6333,7 @@ class HarnessMigrator:
                             results['skipped'] += version_results.get('skipped', 0)
                             # Add skipped IDs (version_results already tracks them in the results from _migrate_template_version)
                             results['skipped_ids'].extend(version_results.get('skipped_ids', []))
+                            results['builtin_ids'].extend(version_results.get('builtin_ids', []))
         
         self._print_skipped_summary(results, 'template')
         return results
