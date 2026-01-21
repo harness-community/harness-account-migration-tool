@@ -157,19 +157,23 @@ This file contains detailed API endpoint information for the Harness Account Mig
 ### Resource Groups
 - **Scope**: Account, Organization, and Project levels
 - **Storage Method**: Always Inline (NOT stored in GitX)
-- **API Version**: Uses resourcegroup/api/v2 endpoints (not ng/api)
-- **Data Format**: Uses JSON structure with nested `resourceGroup` object (not YAML)
-- `GET /resourcegroup/api/v2/resourcegroup` - List resource groups
-  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `pageIndex`, `pageSize`, `sortOrders`
-  - Response: Nested under `data.content` array, each item has `resourceGroup` key containing resource group data
-  - **Note**: Pagination uses `pageIndex` and `pageSize` (not `page` and `size`)
-- `GET /resourcegroup/api/v2/resourcegroup/{identifier}` - Get resource group data
-  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
-  - Response: Nested under `data.resourceGroup`
-- `PUT /resourcegroup/api/v2/resourcegroup/{identifier}` - Create/upsert resource group
-  - Query parameters: `routingId` (account identifier, required), `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
-  - Request body: JSON with nested `resourceGroup` object containing `identifier`, `name`, `color`, `tags`, `description`, `allowedScopeLevels`, `includedScopes`, `resourceFilter`, etc.
-  - **Note**: Uses PUT method, identifier in URL path. Request body must have nested `resourceGroup` structure. Resource groups can reference organizations and projects, so they should be migrated after organizations and projects are created.
+- **API Version**: Uses publicly documented Harness Resource Group API (non-beta) - see https://apidocs.harness.io/harness-resource-group
+- **Data Format**: Uses JSON structure with camelCase field names and nested `resourceGroup` object (not YAML)
+- **Endpoints**:
+  - `GET /authz/api/v2/resourcegroup` - List resource groups (see https://apidocs.harness.io/harness-resource-group/getresourcegrouplistv2)
+    - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional), `pageIndex`, `pageSize`
+    - Response: Nested under `data.content` array, each item has `resourceGroup` key
+    - Pagination uses `pageIndex` and `pageSize`
+  - `GET /authz/api/v2/resourcegroup/{identifier}` - Get resource group
+    - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+    - Response: Nested under `data.resourceGroup`
+  - `POST /authz/api/v2/resourcegroup` - Create resource group
+    - Query parameters: `accountIdentifier`, `orgIdentifier` (optional), `projectIdentifier` (optional)
+    - Request body: JSON with nested `resourceGroup` object containing `accountIdentifier` (required), `orgIdentifier` (optional), `projectIdentifier` (optional), `identifier`, `name`, `description` (optional), `color` (optional), `tags` (optional), `includedScopes` (optional), `resourceFilter` (optional), `allowedScopeLevels` (optional)
+    - **Note**: `accountIdentifier` must be included in the request body, not just as a query parameter
+  - `PUT /authz/api/v2/resourcegroup/{identifier}` - Update resource group
+  - `DELETE /authz/api/v2/resourcegroup/{identifier}` - Delete resource group
+- **Note**: Resource groups can reference organizations and projects, so they should be migrated after organizations and projects are created. Do NOT use the Beta scoped endpoints (`/v1/resource-groups`, `/v1/orgs/{org}/resource-groups`, etc.).
 
 ### Settings
 - **Scope**: Account, Organization, and Project levels

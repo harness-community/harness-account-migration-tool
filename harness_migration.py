@@ -1699,14 +1699,13 @@ class HarnessAPIClient:
     def list_resource_groups(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all resource groups with pagination support
         
-        Uses GET /resourcegroup/api/v2/resourcegroup endpoint
-        Response: Nested under data.content, each item has 'resourceGroup' key
-        Pagination uses pageIndex and pageSize (not page and size)
+        Uses the publicly documented Harness Resource Group API (non-beta):
+        GET /authz/api/v2/resourcegroup with query params for scope
+        
+        See: https://apidocs.harness.io/harness-resource-group/getresourcegrouplistv2
         """
-        endpoint = "/resourcegroup/api/v2/resourcegroup"
-        params = {
-            'routingId': self.account_id  # routingId is required
-        }
+        endpoint = "/authz/api/v2/resourcegroup"
+        params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -1736,15 +1735,15 @@ class HarnessAPIClient:
     
     def get_resource_group_data(self, resource_group_identifier: str, org_identifier: Optional[str] = None,
                                project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get resource group data using GET endpoint
+        """Get resource group data using the public API
         
-        Uses GET /resourcegroup/api/v2/resourcegroup/{identifier}
-        Response is nested under data.resourceGroup
+        Uses the publicly documented Harness Resource Group API (non-beta):
+        GET /authz/api/v2/resourcegroup/{identifier} with query params for scope
+        
+        See: https://apidocs.harness.io/harness-resource-group
         """
-        endpoint = f"/resourcegroup/api/v2/resourcegroup/{resource_group_identifier}"
-        params = {
-            'routingId': self.account_id  # routingId is required
-        }
+        endpoint = f"/authz/api/v2/resourcegroup/{resource_group_identifier}"
+        params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
@@ -1762,41 +1761,88 @@ class HarnessAPIClient:
             return None
     
     def create_resource_group(self, resource_group_data: Dict, org_identifier: Optional[str] = None,
-                             project_identifier: Optional[str] = None) -> bool:
-        """Create/upsert resource group from resource group data
+                             project_identifier: Optional[str] = None) -> str:
+        """Create resource group using the public API
         
-        Uses PUT /resourcegroup/api/v2/resourcegroup/{identifier} endpoint
-        Request body must have nested 'resourceGroup' structure
+        Uses the publicly documented Harness Resource Group API (non-beta):
+        POST /authz/api/v2/resourcegroup with query params for scope
+        
+        See: https://apidocs.harness.io/harness-resource-group
+        
+        Request body must have nested 'resourceGroup' structure.
+        
+        Returns: "success", "skipped", or "failed"
         """
         identifier = resource_group_data.get('identifier')
         if not identifier:
             print("Resource group identifier is required")
-            return False
+            return "failed"
         
-        endpoint = f"/resourcegroup/api/v2/resourcegroup/{identifier}"
-        params = {
-            'routingId': self.account_id  # routingId is required
-        }
+        endpoint = "/authz/api/v2/resourcegroup"
+        params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        # Build request body with nested resourceGroup structure
-        # Include all fields from resource_group_data
-        request_body = {
-            'resourceGroup': resource_group_data
+        # Build the inner resource group object - the API expects camelCase field names
+        # accountIdentifier is required in the request body
+        resource_group_obj = {
+            'accountIdentifier': self.account_id,
+            'identifier': identifier,
+            'name': resource_group_data.get('name', identifier),
         }
         
-        # Use PUT method
-        response = self._make_request('PUT', endpoint, params=params, data=request_body)
+        # Add org and project identifiers if provided
+        if org_identifier:
+            resource_group_obj['orgIdentifier'] = org_identifier
+        if project_identifier:
+            resource_group_obj['projectIdentifier'] = project_identifier
+        
+        # Add optional fields (using camelCase as per Harness API convention)
+        if 'description' in resource_group_data:
+            resource_group_obj['description'] = resource_group_data.get('description')
+        if 'color' in resource_group_data:
+            resource_group_obj['color'] = resource_group_data.get('color')
+        if 'tags' in resource_group_data:
+            resource_group_obj['tags'] = resource_group_data.get('tags')
+        if 'includedScopes' in resource_group_data or 'included_scopes' in resource_group_data:
+            # Get the original includedScopes and update accountIdentifier to match destination account
+            original_scopes = resource_group_data.get('includedScopes', resource_group_data.get('included_scopes', []))
+            updated_scopes = []
+            for scope in original_scopes:
+                if isinstance(scope, dict):
+                    updated_scope = scope.copy()
+                    # Replace accountIdentifier with destination account ID
+                    updated_scope['accountIdentifier'] = self.account_id
+                    updated_scopes.append(updated_scope)
+                else:
+                    updated_scopes.append(scope)
+            resource_group_obj['includedScopes'] = updated_scopes
+        if 'resourceFilter' in resource_group_data or 'resource_filter' in resource_group_data:
+            resource_group_obj['resourceFilter'] = resource_group_data.get('resourceFilter', resource_group_data.get('resource_filter'))
+        if 'allowedScopeLevels' in resource_group_data or 'allowed_scope_levels' in resource_group_data:
+            resource_group_obj['allowedScopeLevels'] = resource_group_data.get('allowedScopeLevels', resource_group_data.get('allowed_scope_levels', []))
+        
+        # Wrap in 'resourceGroup' key as required by the API
+        request_body = {
+            'resourceGroup': resource_group_obj
+        }
+        
+        # Use POST method for creation
+        response = self._make_request('POST', endpoint, params=params, data=request_body)
         
         if response.status_code in [200, 201]:
             print(f"Successfully created resource group")
-            return True
+            return "success"
         else:
-            print(f"Failed to create resource group: {response.status_code} - {response.text}")
-            return False
+            if is_resource_already_exists_error(response.status_code, response.text):
+                scope_info = get_scope_info(org_identifier, project_identifier)
+                print(f"  {format_resource_already_exists_message('resource group', identifier, response.text, scope_info)}")
+                return "skipped"
+            else:
+                print(f"Failed to create resource group: {response.status_code} - {response.text}")
+                return "failed"
     
     def list_settings(self, category: Optional[str] = None, org_identifier: Optional[str] = None,
                      project_identifier: Optional[str] = None) -> List[Dict]:
@@ -5222,7 +5268,13 @@ class HarnessMigrator:
     def migrate_resource_groups(self) -> Dict[str, Any]:
         """Migrate resource groups at all scopes (account, org, project)
         
-        Resource groups use /resourcegroup/api/v2/resourcegroup endpoints.
+        Uses the publicly documented Harness Resource Group API (non-beta):
+        - GET /authz/api/v2/resourcegroup - List resource groups
+        - GET /authz/api/v2/resourcegroup/{identifier} - Get resource group
+        - POST /authz/api/v2/resourcegroup - Create resource group
+        
+        See: https://apidocs.harness.io/harness-resource-group
+        
         Resource groups are always inline (not stored in GitX).
         Resource groups should be migrated after organizations and projects are created.
         """
