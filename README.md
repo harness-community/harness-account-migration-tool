@@ -44,18 +44,19 @@ python harness_migration.py \
 
 ### Required Arguments
 
-- `--source-api-key`: Source account API key (required)
+- `--source-api-key`: Source account API key (required for migration mode, not required for import mode)
 
 ### Optional Arguments
 
-- `--dest-api-key`: Destination account API key (required for migration, not for dry-run)
+- `--dest-api-key`: Destination account API key (required for migration/import, not for dry-run)
 - `--org-identifier`: Filter to specific organization
 - `--project-identifier`: Filter to specific project
 - `--resource-types`: List of resource types to migrate (default: all)
 - `--exclude-resource-types`: List of resource types to exclude (takes precedence over `--resource-types`)
 - `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`)
-- `--dry-run`: List and export resources without migrating
+- `--dry-run`: List and export resources without migrating (or preview import without creating)
 - `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
+- `--import-from-exports`: Import resources from previously exported JSON files instead of migrating from source account
 
 ## Usage Examples
 
@@ -115,6 +116,34 @@ python harness_migration.py \
   --config config.yaml
 ```
 
+### Import from Export Files
+
+The tool supports importing resources from previously exported JSON files. This allows you to:
+- Export resources from a source account
+- Review and modify the exported files if needed
+- Import the resources into a destination account
+
+**Preview import (dry-run):**
+```bash
+python harness_migration.py \
+  --import-from-exports ./harness_exports \
+  --dry-run \
+  --resource-types users
+```
+
+**Import users from export files:**
+```bash
+python harness_migration.py \
+  --import-from-exports ./harness_exports \
+  --dest-api-key YOUR_DEST_API_KEY \
+  --resource-types users
+```
+
+**Notes:**
+- When using `--import-from-exports`, the `--source-api-key` is not required
+- Currently supports importing `users` (additional resource types planned for future releases)
+- Export files must follow the naming convention used by the export process (e.g., `user_{email}_account.json`)
+
 ### Available Resource Types
 
 - `organizations` - Organizations
@@ -144,13 +173,26 @@ python harness_migration.py \
 The script creates a `harness_exports/` directory containing:
 - Exported YAML/JSON files for all resources
 - Files named with resource identifier and scope information
+- These files can be used with `--import-from-exports` to import resources into another account
+
+### Export File Naming Convention
+
+Files are named with the resource type, identifier, and scope:
+- **Account level**: `{resource}_{identifier}_account.json`
+- **Organization level**: `{resource}_{identifier}_org_{org_id}.json`
+- **Project level**: `{resource}_{identifier}_org_{org_id}_project_{project_id}.json`
+
+For users, the email address has `@` replaced with `_at_` in the filename.
+
+### Summary
 
 At the end, a summary shows:
 - **Success**: Number of successfully migrated resources
 - **Failed**: Number of failed migrations
-- **Skipped**: Number of skipped resources (defaults, built-ins, etc.)
+- **Skipped**: Number of skipped resources (defaults, built-ins, already exists, etc.)
 
 In dry-run mode, the summary shows "Found/Exported" instead of "Success".
+In import mode, the summary shows "Would Import" (dry-run) or "Success" (actual import).
 
 ## Important Notes
 

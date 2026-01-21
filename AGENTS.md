@@ -312,16 +312,17 @@ Dry-run mode allows testing without making changes:
 ## Command-Line Interface
 
 ### Required Arguments
-- `--source-api-key`: Source account API key (account ID extracted automatically)
+- `--source-api-key`: Source account API key (account ID extracted automatically). Required for migration mode, not required for import mode.
 
 ### Optional Arguments
-- `--dest-api-key`: Destination account API key (required for actual migration, not for dry-run)
+- `--dest-api-key`: Destination account API key (required for actual migration/import, not for dry-run)
 - `--org-identifier`: Filter to specific organization (optional)
 - `--project-identifier`: Filter to specific project (optional)
 - `--resource-types`: List of resource types to migrate (default: all)
 - `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`)
 - `--dry-run`: Enable dry-run mode
 - `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
+- `--import-from-exports`: Import resources from previously exported JSON files (directory path)
 
 ### Example Usage
 
@@ -345,7 +346,25 @@ python harness_migration.py \
   --source-api-key sat.SOURCE_ACCOUNT_ID.key \
   --dest-api-key sat.DEST_ACCOUNT_ID.key \
   --config config.yaml
+
+# Import users from previously exported files
+python harness_migration.py \
+  --import-from-exports ./harness_exports \
+  --dest-api-key sat.DEST_ACCOUNT_ID.key \
+  --resource-types users
 ```
+
+## Import from Exports
+
+The tool supports importing resources from previously exported JSON files. This is useful for:
+- Reviewing and modifying exported data before import
+- Importing resources without access to the source account
+- Re-importing specific resources after modifications
+
+Currently supported resource types for import:
+- `users` - Users with role bindings
+
+Additional resource types will be supported in future releases.
 
 ## HTTP Configuration
 

@@ -6525,11 +6525,130 @@ class HarnessMigrator:
             all_results['service_accounts'] = self.migrate_service_accounts()
         
         return all_results
+    
+    def import_from_exports(self, import_dir: Path, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+        """Import resources from exported JSON files
+        
+        Args:
+            import_dir: Directory containing exported JSON files
+            resource_types: List of resource types to import (default: all supported)
+        
+        Returns:
+            Dictionary with results per resource type
+        """
+        if resource_types is None:
+            resource_types = ['users']  # Start with users only for now
+        
+        all_results = {}
+        
+        if 'users' in resource_types:
+            all_results['users'] = self.import_users_from_exports(import_dir)
+        
+        return all_results
+    
+    def import_users_from_exports(self, import_dir: Path) -> Dict[str, Any]:
+        """Import users from exported JSON files
+        
+        Reads user_*.json files from the import directory and creates users
+        in the destination account.
+        
+        File naming convention:
+        - user_{email}_account.json - account level user
+        - user_{email}_org_{org_id}.json - org level user
+        - user_{email}_org_{org_id}_project_{project_id}.json - project level user
+        
+        Email in filename has '@' replaced with '_at_'
+        """
+        print(f"\n=== Importing Users from {import_dir} ===")
+        results = self._init_results()
+        
+        if not import_dir.exists():
+            print(f"Import directory does not exist: {import_dir}")
+            return results
+        
+        # Find all user export files
+        user_files = list(import_dir.glob("user_*.json"))
+        
+        if not user_files:
+            print(f"No user export files found in {import_dir}")
+            return results
+        
+        print(f"Found {len(user_files)} user export files")
+        
+        for user_file in user_files:
+            filename = user_file.stem  # Remove .json extension
+            
+            # Parse filename to extract scope
+            # Format: user_{email}_account or user_{email}_org_{org_id} or user_{email}_org_{org_id}_project_{project_id}
+            org_id = None
+            project_id = None
+            
+            if '_org_' in filename:
+                # Has org scope
+                parts = filename.split('_org_')
+                if len(parts) >= 2:
+                    scope_part = parts[1]
+                    if '_project_' in scope_part:
+                        # Has project scope
+                        org_project_parts = scope_part.split('_project_')
+                        org_id = org_project_parts[0]
+                        project_id = org_project_parts[1] if len(org_project_parts) > 1 else None
+                    else:
+                        org_id = scope_part
+            
+            scope_label = "account level" if not org_id else (f"org {org_id}" if not project_id else f"project {project_id} (org {org_id})")
+            
+            print(f"\nProcessing export file: {user_file.name}")
+            print(f"  Scope: {scope_label}")
+            
+            # Load user data from JSON file
+            try:
+                user_data = json.loads(user_file.read_text())
+            except Exception as e:
+                print(f"  Failed to read JSON file: {e}")
+                results['failed'] += 1
+                continue
+            
+            email = user_data.get('email', '')
+            name = user_data.get('name', email)
+            
+            if not email:
+                print(f"  Skipping file - no email found in user data")
+                results['failed'] += 1
+                continue
+            
+            print(f"  User: {name} ({email})")
+            
+            # Create user in destination
+            if self.dry_run:
+                print(f"  [DRY RUN] Would create user: {name} ({email}) at {scope_label}")
+                results['success'] += 1
+            elif self.dest_client:
+                result = self.dest_client.create_user(
+                    user_data=user_data,
+                    org_identifier=org_id,
+                    project_identifier=project_id
+                )
+                if result == "success" or result == True:
+                    print(f"  Successfully created user")
+                    results['success'] += 1
+                elif result == "skipped":
+                    self._add_skipped(results, email, scope_label)
+                else:
+                    results['failed'] += 1
+            else:
+                print(f"  Error: No destination client available")
+                results['failed'] += 1
+            
+            time.sleep(0.5)  # Rate limiting
+        
+        self._print_skipped_summary(results, 'user')
+        return results
 
 
 def main():
     parser = argparse.ArgumentParser(description='Migrate Harness account resources')
-    parser.add_argument('--source-api-key', required=True, help='Source account API key (account ID will be extracted from key)')
+    parser.add_argument('--source-api-key', help='Source account API key (account ID will be extracted from key). Required unless using --import-from-exports.')
     parser.add_argument('--dest-api-key', help='Destination account API key (not required for dry-run, account ID will be extracted from key)')
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
@@ -6547,32 +6666,58 @@ def main():
                        help='Dry run mode: list and export resources without migrating')
     parser.add_argument('--config', dest='config_file',
                        help='Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)')
+    parser.add_argument('--import-from-exports', dest='import_dir', metavar='DIR',
+                       help='Import resources from previously exported JSON files in the specified directory (instead of migrating from source account)')
     
     args = parser.parse_args()
     
     # Load HTTP configuration from file if specified
     http_config = HTTPConfig.from_file(args.config_file) if args.config_file else HTTPConfig()
     
-    # Extract account IDs from API keys
-    try:
-        source_account_id = extract_account_id_from_api_key(args.source_api_key)
-    except ValueError as e:
-        parser.error(f"Invalid source API key: {e}")
+    # Determine mode: import from exports vs. normal migration
+    import_mode = args.import_dir is not None
     
-    dest_account_id = None
-    if not args.dry_run:
-        if not args.dest_api_key:
-            parser.error("--dest-api-key is required when not using --dry-run")
+    if import_mode:
+        # Import from exports mode - source API key not required
+        if not args.dest_api_key and not args.dry_run:
+            parser.error("--dest-api-key is required when importing (unless using --dry-run)")
+        
+        source_account_id = None
+        source_client = None
+        
+        dest_account_id = None
+        dest_client = None
+        if args.dest_api_key:
+            try:
+                dest_account_id = extract_account_id_from_api_key(args.dest_api_key)
+            except ValueError as e:
+                parser.error(f"Invalid destination API key: {e}")
+            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config)
+    else:
+        # Normal migration mode - source API key required
+        if not args.source_api_key:
+            parser.error("--source-api-key is required for migration (use --import-from-exports to import from export files)")
+        
+        # Extract account IDs from API keys
         try:
-            dest_account_id = extract_account_id_from_api_key(args.dest_api_key)
+            source_account_id = extract_account_id_from_api_key(args.source_api_key)
         except ValueError as e:
-            parser.error(f"Invalid destination API key: {e}")
-    
-    # Create API clients (account ID will be extracted from API key if not provided)
-    source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url, http_config)
-    dest_client = None
-    if not args.dry_run:
-        dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config)
+            parser.error(f"Invalid source API key: {e}")
+        
+        dest_account_id = None
+        if not args.dry_run:
+            if not args.dest_api_key:
+                parser.error("--dest-api-key is required when not using --dry-run")
+            try:
+                dest_account_id = extract_account_id_from_api_key(args.dest_api_key)
+            except ValueError as e:
+                parser.error(f"Invalid destination API key: {e}")
+        
+        # Create API clients (account ID will be extracted from API key if not provided)
+        source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url, http_config)
+        dest_client = None
+        if not args.dry_run:
+            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config)
     
     # Apply exclusions: remove excluded resource types from the list
     # Exclusions take precedence over inclusions
@@ -6589,33 +6734,55 @@ def main():
         source_client, dest_client, args.org_identifier, args.project_identifier, args.dry_run
     )
     
-    # Perform migration
-    mode = "DRY RUN - Listing" if args.dry_run else "Migrating"
-    print(f"Starting Harness account {mode.lower()}...")
-    print(f"Source Account: {source_account_id}")
-    if not args.dry_run:
-        print(f"Destination Account: {dest_account_id}")
-    if args.org_identifier:
-        print(f"Organization: {args.org_identifier}")
-    if args.project_identifier:
-        print(f"Project: {args.project_identifier}")
-    print(f"Resource Types: {', '.join(final_resource_types)}")
-    if excluded_types:
-        print(f"Excluded Resource Types: {', '.join(sorted(excluded_types))}")
-    if args.dry_run:
-        print("\n[DRY RUN MODE] Resources will be listed and exported but NOT migrated")
-    
-    results = migrator.migrate_all(final_resource_types)
+    if import_mode:
+        # Import from exports mode
+        import_dir = Path(args.import_dir)
+        mode = "DRY RUN - Import Preview" if args.dry_run else "Importing from exports"
+        print(f"Starting {mode}...")
+        print(f"Import Directory: {import_dir.absolute()}")
+        if dest_account_id:
+            print(f"Destination Account: {dest_account_id}")
+        print(f"Resource Types: {', '.join(final_resource_types)}")
+        if excluded_types:
+            print(f"Excluded Resource Types: {', '.join(sorted(excluded_types))}")
+        if args.dry_run:
+            print("\n[DRY RUN MODE] Resources will be previewed but NOT imported")
+        
+        results = migrator.import_from_exports(import_dir, final_resource_types)
+    else:
+        # Normal migration mode
+        mode = "DRY RUN - Listing" if args.dry_run else "Migrating"
+        print(f"Starting Harness account {mode.lower()}...")
+        print(f"Source Account: {source_account_id}")
+        if not args.dry_run:
+            print(f"Destination Account: {dest_account_id}")
+        if args.org_identifier:
+            print(f"Organization: {args.org_identifier}")
+        if args.project_identifier:
+            print(f"Project: {args.project_identifier}")
+        print(f"Resource Types: {', '.join(final_resource_types)}")
+        if excluded_types:
+            print(f"Excluded Resource Types: {', '.join(sorted(excluded_types))}")
+        if args.dry_run:
+            print("\n[DRY RUN MODE] Resources will be listed and exported but NOT migrated")
+        
+        results = migrator.migrate_all(final_resource_types)
     
     # Print summary
     print("\n" + "="*50)
-    summary_title = "DRY RUN SUMMARY" if args.dry_run else "MIGRATION SUMMARY"
+    if import_mode:
+        summary_title = "IMPORT DRY RUN SUMMARY" if args.dry_run else "IMPORT SUMMARY"
+    else:
+        summary_title = "DRY RUN SUMMARY" if args.dry_run else "MIGRATION SUMMARY"
     print(summary_title)
     print("="*50)
     for resource_type, result in results.items():
         print(f"\n{resource_type.upper()}:")
         if args.dry_run:
-            print(f"  Found/Exported: {result['success']}")
+            if import_mode:
+                print(f"  Would Import: {result['success']}")
+            else:
+                print(f"  Found/Exported: {result['success']}")
         else:
             print(f"  Success: {result['success']}")
         print(f"  Failed: {result['failed']}")
@@ -6627,12 +6794,17 @@ def main():
     
     print(f"\nTOTAL:")
     if args.dry_run:
-        print(f"  Found/Exported: {total_success}")
+        if import_mode:
+            print(f"  Would Import: {total_success}")
+        else:
+            print(f"  Found/Exported: {total_success}")
     else:
         print(f"  Success: {total_success}")
     print(f"  Failed: {total_failed}")
     print(f"  Skipped: {total_skipped}")
-    print(f"\nExported YAML files saved to: {migrator.export_dir.absolute()}")
+    
+    if not import_mode:
+        print(f"\nExported YAML files saved to: {migrator.export_dir.absolute()}")
 
 
 if __name__ == "__main__":
