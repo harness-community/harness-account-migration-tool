@@ -212,7 +212,7 @@ class HarnessAPIClient:
     """Client for interacting with Harness API"""
     
     def __init__(self, api_key: str, account_id: Optional[str] = None, base_url: str = "https://app.harness.io/gateway",
-                 http_config: Optional[HTTPConfig] = None):
+                 http_config: Optional[HTTPConfig] = None, debug: bool = False):
         self.api_key = api_key
         # Extract account ID from API key if not provided
         if account_id:
@@ -221,6 +221,7 @@ class HarnessAPIClient:
             self.account_id = extract_account_id_from_api_key(api_key)
         self.base_url = base_url
         self.http_config = http_config or HTTPConfig()
+        self.debug = debug
         
         # Create a session for connection pooling and consistent settings
         self.session = requests.Session()
@@ -260,6 +261,10 @@ class HarnessAPIClient:
         
         timeout = self.http_config.timeout
         
+        # Debug: Log request details
+        if self.debug:
+            self._debug_log_request(method, url, params, request_headers, data)
+        
         try:
             if method.upper() == 'GET':
                 response = self.session.get(url, headers=request_headers, params=params, 
@@ -287,10 +292,79 @@ class HarnessAPIClient:
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
+            # Debug: Log response details
+            if self.debug:
+                self._debug_log_response(response)
+            
             return response
         except requests.exceptions.RequestException as e:
             print(f"Request error: {e}")
             raise
+    
+    def _debug_log_request(self, method: str, url: str, params: Dict, headers: Dict, data: Any) -> None:
+        """Log detailed request information for debugging"""
+        print("\n" + "="*60)
+        print("[DEBUG] API REQUEST")
+        print("="*60)
+        print(f"Method: {method.upper()}")
+        print(f"URL: {url}")
+        
+        # Log query parameters (redact sensitive info)
+        if params:
+            safe_params = {k: ('***' if 'key' in k.lower() or 'token' in k.lower() else v) 
+                          for k, v in params.items()}
+            print(f"Query Params: {json.dumps(safe_params, indent=2)}")
+        
+        # Log headers (redact API key)
+        all_headers = dict(self.session.headers)
+        all_headers.update(headers)
+        safe_headers = {k: ('***REDACTED***' if k.lower() == 'x-api-key' else v) 
+                       for k, v in all_headers.items()}
+        print(f"Headers: {json.dumps(safe_headers, indent=2)}")
+        
+        # Log request body
+        if data:
+            if isinstance(data, str):
+                # Truncate long strings
+                body_preview = data[:1000] + '...' if len(data) > 1000 else data
+                print(f"Body (string): {body_preview}")
+            else:
+                try:
+                    body_str = json.dumps(data, indent=2)
+                    body_preview = body_str[:2000] + '\n...(truncated)' if len(body_str) > 2000 else body_str
+                    print(f"Body (JSON):\n{body_preview}")
+                except:
+                    print(f"Body: {data}")
+        print("-"*60)
+    
+    def _debug_log_response(self, response: requests.Response) -> None:
+        """Log detailed response information for debugging"""
+        print("[DEBUG] API RESPONSE")
+        print("-"*60)
+        print(f"Status Code: {response.status_code} {response.reason}")
+        
+        # Log response headers
+        print(f"Response Headers: {json.dumps(dict(response.headers), indent=2)}")
+        
+        # Log response body
+        try:
+            response_text = response.text
+            if response_text:
+                # Try to pretty-print JSON
+                try:
+                    response_json = response.json()
+                    body_str = json.dumps(response_json, indent=2)
+                    body_preview = body_str[:3000] + '\n...(truncated)' if len(body_str) > 3000 else body_str
+                    print(f"Response Body (JSON):\n{body_preview}")
+                except:
+                    body_preview = response_text[:3000] + '...(truncated)' if len(response_text) > 3000 else response_text
+                    print(f"Response Body:\n{body_preview}")
+            else:
+                print("Response Body: (empty)")
+        except Exception as e:
+            print(f"Response Body: (error reading: {e})")
+        
+        print("="*60 + "\n")
     
     def _fetch_paginated(self, method: str, endpoint: str, params: Optional[Dict] = None,
                         data: Optional[Union[Dict, str]] = None, page_size: int = 100,
@@ -6668,6 +6742,8 @@ def main():
                        help='Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)')
     parser.add_argument('--import-from-exports', dest='import_dir', metavar='DIR',
                        help='Import resources from previously exported JSON files in the specified directory (instead of migrating from source account)')
+    parser.add_argument('--debug', action='store_true',
+                       help='Enable debug mode with detailed API request/response logging')
     
     args = parser.parse_args()
     
@@ -6692,7 +6768,7 @@ def main():
                 dest_account_id = extract_account_id_from_api_key(args.dest_api_key)
             except ValueError as e:
                 parser.error(f"Invalid destination API key: {e}")
-            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config)
+            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config, debug=args.debug)
     else:
         # Normal migration mode - source API key required
         if not args.source_api_key:
@@ -6714,10 +6790,10 @@ def main():
                 parser.error(f"Invalid destination API key: {e}")
         
         # Create API clients (account ID will be extracted from API key if not provided)
-        source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url, http_config)
+        source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url, http_config, debug=args.debug)
         dest_client = None
         if not args.dry_run:
-            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config)
+            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config, debug=args.debug)
     
     # Apply exclusions: remove excluded resource types from the list
     # Exclusions take precedence over inclusions
@@ -6733,6 +6809,11 @@ def main():
     migrator = HarnessMigrator(
         source_client, dest_client, args.org_identifier, args.project_identifier, args.dry_run
     )
+    
+    # Print debug mode notice
+    if args.debug:
+        print("\n[DEBUG MODE ENABLED] Detailed API request/response logging is active")
+        print("WARNING: Debug output may contain sensitive data. Do not share logs publicly.\n")
     
     if import_mode:
         # Import from exports mode

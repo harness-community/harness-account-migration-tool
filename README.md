@@ -57,6 +57,7 @@ python harness_migration.py \
 - `--dry-run`: List and export resources without migrating (or preview import without creating)
 - `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
 - `--import-from-exports`: Import resources from previously exported JSON files instead of migrating from source account
+- `--debug`: Enable detailed API request/response logging for troubleshooting
 
 ## Usage Examples
 
@@ -304,6 +305,27 @@ timeout: 30
 - Verify proxy URL is correct and accessible
 - Check if proxy requires authentication (add credentials to proxy URL: `http://user:pass@proxy:8080`)
 - Ensure `no_proxy` is configured for any hosts that should bypass the proxy
+
+### Debugging API Issues
+
+Use the `--debug` flag to see detailed information about every API call:
+
+```bash
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --dry-run \
+  --debug \
+  --resource-types connectors
+```
+
+Debug mode shows:
+- Full request URL, method, and query parameters
+- Request headers (API key is redacted)
+- Request body (JSON formatted, truncated if large)
+- Response status code and headers
+- Response body (JSON formatted, truncated if large)
+
+**Warning**: Debug output may contain sensitive data. Do not share debug logs publicly.
 
 ### SSL Certificate Issues
 

@@ -323,6 +323,7 @@ Dry-run mode allows testing without making changes:
 - `--dry-run`: Enable dry-run mode
 - `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
 - `--import-from-exports`: Import resources from previously exported JSON files (directory path)
+- `--debug`: Enable detailed API request/response logging for troubleshooting
 
 ### Example Usage
 
