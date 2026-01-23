@@ -1980,29 +1980,40 @@ class HarnessAPIClient:
             return False
     
     def list_ip_allowlists(self) -> List[Dict]:
-        """List all IP allowlists
+        """List all IP allowlists with pagination support
         
-        Uses GET /v1/ip-allowlist endpoint
-        Response: Direct array, each item has 'ip_allowlist_config' key
+        Uses GET /v1/ip-allowlist endpoint with pagination
+        See: https://apidocs.harness.io/ip-allowlist/get-ip-allowlist-configs
+        
+        Response: Array of items, each with 'ip_allowlist_config' key
         IP allowlists are account-level only (no org/project scoping)
+        Pagination uses 'page' and 'limit' parameters
         """
         endpoint = "/v1/ip-allowlist"
         headers = {
             'harness-account': self.account_id  # harness-account header is required
         }
         
-        response = self._make_request('GET', endpoint, headers=headers)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # Response is a direct array, each item has 'ip_allowlist_config' key
+        try:
+            # Use _fetch_paginated helper with GET method
+            # Pagination uses 'page' and 'limit' parameters
+            # Response is an array directly (not nested under data.content)
+            items = self._fetch_paginated(
+                'GET', endpoint, params={},
+                headers=headers,
+                page_param_name='page',
+                size_param_name='limit',
+                content_path=None  # Response is direct array
+            )
+            
+            # Extract IP allowlist data from each item (each has 'ip_allowlist_config' key)
             allowlists = []
-            for item in data:
+            for item in items:
                 allowlist_data = item.get('ip_allowlist_config', item)
                 allowlists.append(allowlist_data)
             return allowlists
-        else:
-            print(f"Failed to list IP allowlists: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"Failed to list IP allowlists: {e}")
             return []
     
     def create_ip_allowlist(self, ip_allowlist_data: Dict) -> bool:

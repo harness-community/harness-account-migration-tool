@@ -192,8 +192,9 @@ This file contains detailed API endpoint information for the Harness Account Mig
 ### IP Allowlists
 - **Scope**: Account-level only (no org/project scoping)
 - **Storage Method**: Always Inline (NOT stored in GitX)
-- **API Version**: Uses v1 endpoints (not ng/api)
+- **API Version**: Uses v1 endpoints (not ng/api) - see https://apidocs.harness.io/ip-allowlist/get-ip-allowlist-configs
 - **Data Format**: Uses JSON structure with nested `ip_allowlist_config` object (not YAML)
+- **Pagination**: Uses `page` and `limit` parameters
 - `GET /v1/ip-allowlist` - List IP allowlists
   - Headers: `x-api-key`, `harness-account` (account identifier, required)
   - Response: Direct array, each item has `ip_allowlist_config` key containing allowlist data
