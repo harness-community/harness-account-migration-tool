@@ -625,14 +625,28 @@ class HarnessAPIClient:
             return []
     
     def get_pipeline_data(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
-                         project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get pipeline data (for both GitX and Inline detection)"""
+                         project_identifier: Optional[str] = None, branch: Optional[str] = None,
+                         load_from_fallback_branch: bool = False) -> Optional[Dict]:
+        """Get pipeline data (for both GitX and Inline detection)
+        
+        Args:
+            pipeline_identifier: The pipeline identifier
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            branch: Git branch for GitX resources on non-default branches (optional)
+            load_from_fallback_branch: If True, load from fallback branch when default branch fails (optional)
+                See: https://apidocs.harness.io/pipelines/get-pipeline#pipelines/get-pipeline/request/query
+        """
         endpoint = f"/pipeline/api/pipelines/{pipeline_identifier}"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        if branch:
+            params['branch'] = branch
+        if load_from_fallback_branch:
+            params['loadFromFallbackBranch'] = 'true'
         
         response = self._make_request('GET', endpoint, params=params)
         
@@ -646,9 +660,11 @@ class HarnessAPIClient:
             return None
     
     def get_pipeline_yaml(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
-                         project_identifier: Optional[str] = None) -> Optional[str]:
+                         project_identifier: Optional[str] = None, branch: Optional[str] = None,
+                         load_from_fallback_branch: bool = False) -> Optional[str]:
         """Get pipeline YAML"""
-        pipeline_data = self.get_pipeline_data(pipeline_identifier, org_identifier, project_identifier)
+        pipeline_data = self.get_pipeline_data(pipeline_identifier, org_identifier, project_identifier, 
+                                               branch=branch, load_from_fallback_branch=load_from_fallback_branch)
         if pipeline_data:
             return pipeline_data.get('yamlPipeline', '')
         return None
@@ -754,8 +770,17 @@ class HarnessAPIClient:
             return []
     
     def get_input_set_data(self, input_set_identifier: str, pipeline_identifier: str,
-                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get input set data - returns full data dict (for both GitX and Inline detection)"""
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                          load_from_fallback_branch: bool = False) -> Optional[Dict]:
+        """Get input set data - returns full data dict (for both GitX and Inline detection)
+        
+        Args:
+            input_set_identifier: The input set identifier
+            pipeline_identifier: The parent pipeline identifier
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            load_from_fallback_branch: If True, load from fallback branch when default branch fails (optional)
+        """
         endpoint = f"/pipeline/api/inputSets/{input_set_identifier}"
         params = {
             'pipelineIdentifier': pipeline_identifier
@@ -764,6 +789,8 @@ class HarnessAPIClient:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        if load_from_fallback_branch:
+            params['loadFromFallbackBranch'] = 'true'
         
         response = self._make_request('GET', endpoint, params=params)
         
@@ -776,9 +803,11 @@ class HarnessAPIClient:
             return None
     
     def get_input_set_yaml(self, input_set_identifier: str, pipeline_identifier: str,
-                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
+                          org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                          load_from_fallback_branch: bool = False) -> Optional[str]:
         """Get input set YAML string"""
-        input_set_data = self.get_input_set_data(input_set_identifier, pipeline_identifier, org_identifier, project_identifier)
+        input_set_data = self.get_input_set_data(input_set_identifier, pipeline_identifier, org_identifier, 
+                                                  project_identifier, load_from_fallback_branch=load_from_fallback_branch)
         if input_set_data:
             return input_set_data.get('inputSetYaml', '')
         return None
@@ -983,14 +1012,23 @@ class HarnessAPIClient:
             return []
     
     def get_service_data(self, service_identifier: str, org_identifier: Optional[str] = None,
-                        project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get service data (for both GitX and Inline detection)"""
+                        project_identifier: Optional[str] = None, branch: Optional[str] = None) -> Optional[Dict]:
+        """Get service data (for both GitX and Inline detection)
+        
+        Args:
+            service_identifier: The service identifier
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            branch: Git branch for GitX resources on non-default branches (optional)
+        """
         endpoint = f"/ng/api/servicesV2/{service_identifier}"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        if branch:
+            params['branch'] = branch
         
         response = self._make_request('GET', endpoint, params=params)
         
@@ -1004,9 +1042,9 @@ class HarnessAPIClient:
             return None
     
     def get_service_yaml(self, service_identifier: str, org_identifier: Optional[str] = None,
-                        project_identifier: Optional[str] = None) -> Optional[str]:
+                        project_identifier: Optional[str] = None, branch: Optional[str] = None) -> Optional[str]:
         """Get service YAML"""
-        service_data = self.get_service_data(service_identifier, org_identifier, project_identifier)
+        service_data = self.get_service_data(service_identifier, org_identifier, project_identifier, branch=branch)
         if service_data:
             return service_data.get('yaml', '')
         return None
@@ -2831,14 +2869,23 @@ class HarnessAPIClient:
             return []
     
     def get_environment_data(self, environment_identifier: str, org_identifier: Optional[str] = None,
-                            project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get environment data (for both GitX and Inline detection)"""
+                            project_identifier: Optional[str] = None, branch: Optional[str] = None) -> Optional[Dict]:
+        """Get environment data (for both GitX and Inline detection)
+        
+        Args:
+            environment_identifier: The environment identifier
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            branch: Git branch for GitX resources on non-default branches (optional)
+        """
         endpoint = f"/ng/api/environmentsV2/{environment_identifier}"
         params = {}
         if org_identifier:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        if branch:
+            params['branch'] = branch
         
         response = self._make_request('GET', endpoint, params=params)
         
@@ -2852,9 +2899,9 @@ class HarnessAPIClient:
             return None
     
     def get_environment_yaml(self, environment_identifier: str, org_identifier: Optional[str] = None,
-                           project_identifier: Optional[str] = None) -> Optional[str]:
+                           project_identifier: Optional[str] = None, branch: Optional[str] = None) -> Optional[str]:
         """Get environment YAML"""
-        env_data = self.get_environment_data(environment_identifier, org_identifier, project_identifier)
+        env_data = self.get_environment_data(environment_identifier, org_identifier, project_identifier, branch=branch)
         if env_data:
             return env_data.get('yaml', '')
         return None
@@ -3078,8 +3125,17 @@ class HarnessAPIClient:
             return []
     
     def get_infrastructure_data(self, infrastructure_identifier: str, environment_identifier: str,
-                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[Dict]:
-        """Get infrastructure data (for both GitX and Inline detection)"""
+                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                               branch: Optional[str] = None) -> Optional[Dict]:
+        """Get infrastructure data (for both GitX and Inline detection)
+        
+        Args:
+            infrastructure_identifier: The infrastructure identifier
+            environment_identifier: The environment identifier
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            branch: Git branch for GitX resources on non-default branches (optional)
+        """
         endpoint = f"/ng/api/infrastructures/{infrastructure_identifier}"
         params = {
             'environmentIdentifier': environment_identifier
@@ -3088,6 +3144,8 @@ class HarnessAPIClient:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        if branch:
+            params['branch'] = branch
         
         response = self._make_request('GET', endpoint, params=params)
         
@@ -3101,9 +3159,10 @@ class HarnessAPIClient:
             return None
     
     def get_infrastructure_yaml(self, infrastructure_identifier: str, environment_identifier: str,
-                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> Optional[str]:
+                               org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
+                               branch: Optional[str] = None) -> Optional[str]:
         """Get infrastructure YAML"""
-        infra_data = self.get_infrastructure_data(infrastructure_identifier, environment_identifier, org_identifier, project_identifier)
+        infra_data = self.get_infrastructure_data(infrastructure_identifier, environment_identifier, org_identifier, project_identifier, branch=branch)
         if infra_data:
             return infra_data.get('yaml', '')
         return None
@@ -4199,9 +4258,15 @@ class HarnessMigrator:
                 name = env_item.get('name', identifier)
                 print(f"\nProcessing environment: {name} ({identifier}) at {scope_label}")
                 
+                # Extract branch from list metadata for GitX resources on non-default branches
+                # The branch field in entityGitDetails may be None for non-default branches,
+                # in which case the actual branch is stored in fallbackBranch
+                list_git_details = env_item.get('entityGitDetails') or env_item.get('gitDetails') or {}
+                branch = list_git_details.get('branch') or env_item.get('fallbackBranch')
+                
                 # Get environment data to detect storage type
                 env_data = self.source_client.get_environment_data(
-                    identifier, org_id, project_id
+                    identifier, org_id, project_id, branch=branch
                 )
                 
                 if not env_data:
@@ -4329,9 +4394,15 @@ class HarnessMigrator:
                     name = infra_item.get('name', identifier)
                     print(f"\nProcessing infrastructure: {name} ({identifier}) in environment {env_name} at {scope_label}")
                     
+                    # Extract branch from list metadata for GitX resources on non-default branches
+                    # The branch field in entityGitDetails may be None for non-default branches,
+                    # in which case the actual branch is stored in fallbackBranch
+                    list_git_details = infra_item.get('entityGitDetails') or infra_item.get('gitDetails') or {}
+                    branch = list_git_details.get('branch') or infra_item.get('fallbackBranch')
+                    
                     # Get infrastructure data to detect storage type
                     infra_data = self.source_client.get_infrastructure_data(
-                        identifier, env_identifier, org_id, project_id
+                        identifier, env_identifier, org_id, project_id, branch=branch
                     )
                     
                     if not infra_data:
@@ -4435,9 +4506,15 @@ class HarnessMigrator:
                 name = service_item.get('name', identifier)
                 print(f"\nProcessing service: {name} ({identifier}) at {scope_label}")
                 
+                # Extract branch from list metadata for GitX resources on non-default branches
+                # The branch field in entityGitDetails may be None for non-default branches,
+                # in which case the actual branch is stored in fallbackBranch
+                list_git_details = service_item.get('entityGitDetails') or service_item.get('gitDetails') or {}
+                branch = list_git_details.get('branch') or service_item.get('fallbackBranch')
+                
                 # Get service data to detect storage type
                 service_data = self.source_client.get_service_data(
-                    identifier, org_id, project_id
+                    identifier, org_id, project_id, branch=branch
                 )
                 
                 if not service_data:
@@ -5879,9 +5956,21 @@ class HarnessMigrator:
                 name = pipeline_item.get('name', identifier)
                 print(f"\nProcessing pipeline: {name} ({identifier}) at {scope_label}")
                 
+                # Extract branch from list metadata for GitX resources on non-default branches
+                # For pipelines, the list response doesn't include fallbackBranch like other resources
+                # Instead, we use loadFromFallbackBranch=true when branch is None for REMOTE pipelines
+                # See: https://apidocs.harness.io/pipelines/get-pipeline#pipelines/get-pipeline/request/query
+                list_git_details = pipeline_item.get('entityGitDetails') or pipeline_item.get('gitDetails') or {}
+                branch = list_git_details.get('branch')
+                store_type = pipeline_item.get('storeType', '')
+                
+                # For REMOTE pipelines with no branch info, use loadFromFallbackBranch
+                load_from_fallback = (store_type == 'REMOTE' and not branch)
+                
                 # Get pipeline data to detect storage type
                 pipeline_data = self.source_client.get_pipeline_data(
-                    identifier, org_id, project_id
+                    identifier, org_id, project_id, branch=branch, 
+                    load_from_fallback_branch=load_from_fallback
                 )
                 
                 if not pipeline_data:
@@ -6005,8 +6094,20 @@ class HarnessMigrator:
                 if not input_sets:
                     continue  # No input sets for this pipeline
                 
+                # For pipelines, the list response doesn't include fallbackBranch
+                # Instead, we use loadFromFallbackBranch=true when branch is None for REMOTE pipelines
+                list_git_details = pipeline_item.get('entityGitDetails') or pipeline_item.get('gitDetails') or {}
+                pipeline_branch = list_git_details.get('branch')
+                pipeline_store_type = pipeline_item.get('storeType', '')
+                
+                # For REMOTE pipelines with no branch info, use loadFromFallbackBranch
+                load_from_fallback = (pipeline_store_type == 'REMOTE' and not pipeline_branch)
+                
                 # Get pipeline data to check if pipeline is GitX (input sets inherit GitX from pipeline)
-                pipeline_data = self.source_client.get_pipeline_data(pipeline_identifier, org_id, project_id)
+                pipeline_data = self.source_client.get_pipeline_data(
+                    pipeline_identifier, org_id, project_id, 
+                    load_from_fallback_branch=load_from_fallback
+                )
                 pipeline_is_gitx = False
                 if pipeline_data:
                     pipeline_is_gitx = self.source_client.is_gitx_resource(pipeline_data)
@@ -6022,8 +6123,10 @@ class HarnessMigrator:
                     print(f"  Processing input set: {name} ({identifier})")
                     
                     # Get full input set data
+                    # Use loadFromFallbackBranch if parent pipeline is on non-default branch
                     input_set_data = self.source_client.get_input_set_data(
-                        identifier, pipeline_identifier, org_id, project_id
+                        identifier, pipeline_identifier, org_id, project_id,
+                        load_from_fallback_branch=load_from_fallback
                     )
                     
                     if not input_set_data:

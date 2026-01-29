@@ -62,6 +62,22 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 3. Git-related fields (`repo`, `branch`)
 4. Defaults to Inline if no indicators found
 
+### GitX Resources on Non-Default Branches
+
+GitX resources can be stored on Git branches other than the default branch. The migration tool automatically handles these cases:
+
+**For Environments, Infrastructures, and Services:**
+- The list API returns `entityGitDetails.branch` as `null` for non-default branches
+- The actual branch is stored in the `fallbackBranch` field
+- Migration methods extract branch using: `entityGitDetails.branch or item.fallbackBranch`
+- This branch is passed to `get_*_data()` methods to fetch from the correct branch
+
+**For Pipelines and Input Sets:**
+- The list API does NOT return `fallbackBranch` for pipelines
+- Instead, use `loadFromFallbackBranch=true` query parameter when fetching data
+- Migration methods detect REMOTE pipelines with no branch info and automatically use this parameter
+- Input sets inherit this setting from their parent pipeline
+
 ### Resource-Specific Storage Methods
 
 - **Organizations and Projects**: Always Inline (not YAML-based)

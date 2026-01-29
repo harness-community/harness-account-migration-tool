@@ -33,7 +33,9 @@ This file contains detailed API endpoint information for the Harness Account Mig
 
 ### Environments
 - `GET /ng/api/environmentsV2` - List environments
+  - Response includes `fallbackBranch` field for GitX resources on non-default branches
 - `GET /ng/api/environmentsV2/{identifier}` - Get environment
+  - Query parameters: `orgIdentifier`, `projectIdentifier`, `branch` (optional, for GitX on non-default branches)
 - `POST /ng/api/environmentsV2` - Create environment (for inline resources)
   - Request body: JSON with `yaml`, `identifier`, `type`, `name`, `orgIdentifier`, `projectIdentifier`
 - `POST /ng/api/environmentsV2/import` - Import environment from GitX
@@ -42,8 +44,9 @@ This file contains detailed API endpoint information for the Harness Account Mig
 
 ### Infrastructures
 - `GET /ng/api/infrastructures` - List infrastructures
+  - Response includes `fallbackBranch` field for GitX resources on non-default branches
 - `GET /ng/api/infrastructures/{identifier}` - Get infrastructure
-  - Query parameters: `environmentIdentifier` (required)
+  - Query parameters: `environmentIdentifier` (required), `orgIdentifier`, `projectIdentifier`, `branch` (optional, for GitX on non-default branches)
 - `POST /ng/api/infrastructures` - Create infrastructure (for inline resources)
   - Request body: JSON with `yaml`, `accountId`, `environmentIdentifier`, `orgIdentifier`, `projectIdentifier`
 - `POST /ng/api/infrastructures/import` - Import infrastructure from GitX
@@ -52,7 +55,9 @@ This file contains detailed API endpoint information for the Harness Account Mig
 
 ### Services
 - `GET /ng/api/servicesV2` - List services
+  - Response includes `fallbackBranch` field for GitX resources on non-default branches
 - `GET /ng/api/servicesV2/{identifier}` - Get service
+  - Query parameters: `orgIdentifier`, `projectIdentifier`, `branch` (optional, for GitX on non-default branches)
 - `POST /ng/api/servicesV2` - Create service (for inline resources)
   - Request body: JSON with `yaml`, `identifier`, `name`, `accountId`, `orgIdentifier`, `projectIdentifier`
 - `POST /ng/api/servicesV2/import` - Import service from GitX
@@ -248,7 +253,10 @@ This file contains detailed API endpoint information for the Harness Account Mig
 - **Scope**: Project-level only
 - `POST /pipeline/api/pipelines/list` - List pipelines
   - Request body: Pagination parameters
+  - Response does NOT include `fallbackBranch` for GitX pipelines on non-default branches
 - `GET /pipeline/api/pipelines/{identifier}` - Get pipeline
+  - Query parameters: `orgIdentifier`, `projectIdentifier`, `branch` (optional), `loadFromFallbackBranch` (optional, use `true` for GitX on non-default branches)
+  - See: https://apidocs.harness.io/pipelines/get-pipeline#pipelines/get-pipeline/request/query
 - `POST /v1/orgs/{org}/projects/{project}/pipelines` - Create pipeline (for inline resources)
   - Request body: JSON with `pipeline_yaml`, `identifier`, `name`, `accountId`, `orgIdentifier`, `projectIdentifier`, `tags`
 - `POST /pipeline/api/pipelines/import` - Import pipeline from GitX
@@ -259,8 +267,9 @@ This file contains detailed API endpoint information for the Harness Account Mig
 - **Scope**: Project-level only (child entities of pipelines)
 - `GET /pipeline/api/inputSets` - List input sets for a pipeline
   - Query parameters: `pipelineIdentifier`, `orgIdentifier`, `projectIdentifier`
+  - Response does NOT include `fallbackBranch` (inherits from parent pipeline)
 - `GET /pipeline/api/inputSets/{identifier}` - Get input set data
-  - Query parameters: `pipelineIdentifier`, `orgIdentifier`, `projectIdentifier`
+  - Query parameters: `pipelineIdentifier`, `orgIdentifier`, `projectIdentifier`, `loadFromFallbackBranch` (optional, use `true` for GitX on non-default branches)
 - `POST /pipeline/api/inputSets` - Create input set (for inline resources)
   - Query parameters: `pipelineIdentifier`, `orgIdentifier`, `projectIdentifier`
   - Request body: JSON with `{"inputSet": {...}}`

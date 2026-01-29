@@ -345,6 +345,55 @@ The `is_gitx_resource()` method detects storage method by checking:
 **Resource-Specific GitX Detection**:
 - **Overrides**: Check for `entityGitInfo` field (not `gitDetails`)
 
+## GitX Resources on Non-Default Branches
+
+GitX resources can be stored on non-default Git branches. The migration tool automatically handles these cases, but the approach differs by resource type.
+
+### Branch Detection from List Response
+
+**For Environments, Infrastructures, and Services:**
+- The list response includes `entityGitDetails` or `gitDetails` with a `branch` field
+- For resources on non-default branches, `branch` is `null`
+- The actual branch is stored in the `fallbackBranch` field at the item level
+- **Extraction pattern**:
+  ```python
+  list_git_details = item.get('entityGitDetails') or item.get('gitDetails') or {}
+  branch = list_git_details.get('branch') or item.get('fallbackBranch')
+  ```
+
+**For Pipelines and Input Sets:**
+- The list response does NOT include `fallbackBranch`
+- Instead, use `loadFromFallbackBranch=true` query parameter when fetching data
+- **Detection pattern**:
+  ```python
+  list_git_details = item.get('entityGitDetails') or item.get('gitDetails') or {}
+  branch = list_git_details.get('branch')
+  store_type = item.get('storeType', '')
+  load_from_fallback = (store_type == 'REMOTE' and not branch)
+  ```
+
+### API Parameters for Non-Default Branches
+
+**`get_environment_data`, `get_infrastructure_data`, `get_service_data`:**
+- Accept optional `branch` parameter
+- Pass the branch extracted from list metadata (including `fallbackBranch`)
+- Example: `get_service_data(identifier, org_id, project_id, branch=branch)`
+
+**`get_pipeline_data`, `get_input_set_data`:**
+- Accept optional `load_from_fallback_branch` parameter
+- When `True`, adds `loadFromFallbackBranch=true` to query parameters
+- Example: `get_pipeline_data(identifier, org_id, project_id, load_from_fallback_branch=True)`
+
+### Migration Method Handling
+
+Each migration method automatically handles non-default branches:
+
+1. **`migrate_environments`**: Extracts `branch` from `entityGitDetails.branch` or `fallbackBranch`, passes to `get_environment_data`
+2. **`migrate_infrastructures`**: Same pattern as environments
+3. **`migrate_services`**: Same pattern as environments
+4. **`migrate_pipelines`**: Detects REMOTE pipelines with no branch, uses `loadFromFallbackBranch=true`
+5. **`migrate_input_sets`**: Uses parent pipeline's branch detection to set `loadFromFallbackBranch` for both pipeline and input set data retrieval
+
 ## Content-Type Exceptions
 
 Default: `application/json`
