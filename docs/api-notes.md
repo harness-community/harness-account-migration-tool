@@ -64,6 +64,12 @@ This file contains detailed API endpoint information for the Harness Account Mig
   - Query parameters: `accountIdentifier`, `serviceIdentifier`, `connectorRef`, `repoName`, `branch`, `filePath`
   - No request body
 
+### Git Branch Information
+- `GET /ng/api/scm/list-branches` - List branches for a Git repository
+  - Query parameters: `routingId`, `connectorRef`, `accountIdentifier`, `orgIdentifier`, `projectIdentifier`, `repoName`, `size`
+  - Returns: `branches` array and `defaultBranch` object
+  - Used to get default branch when `branch` is null but `fallbackBranch` exists (may have been merged)
+
 ### Overrides
 - **Scope**: Account, Organization, and Project levels
 - `POST /ng/api/serviceOverrides/v2/list` - List overrides

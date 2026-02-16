@@ -64,19 +64,29 @@ The `is_gitx_resource()` method automatically detects storage method by checking
 
 ### GitX Resources on Non-Default Branches
 
-GitX resources can be stored on Git branches other than the default branch. The migration tool automatically handles these cases:
+GitX resources can be stored on Git branches other than the default branch. The migration tool automatically handles these cases using a "try default first" strategy:
+
+**Branch Resolution Strategy:**
+When `branch` is null but `fallbackBranch` exists, the resource may be on either:
+1. The **default branch** (if fallbackBranch was merged to default)
+2. The **fallback branch** (if it hasn't been merged)
+
+The tool tries the **default branch first**, then falls back:
+1. Get the default branch using `GET /ng/api/scm/list-branches`
+2. Try fetching the resource from the default branch
+3. If that fails, try the fallback branch (or `loadFromFallbackBranch=true` for pipelines)
 
 **For Environments, Infrastructures, and Services:**
 - The list API returns `entityGitDetails.branch` as `null` for non-default branches
 - The actual branch is stored in the `fallbackBranch` field
-- Migration methods extract branch using: `entityGitDetails.branch or item.fallbackBranch`
-- This branch is passed to `get_*_data()` methods to fetch from the correct branch
+- Migration methods try default branch first using `get_default_branch()` API
+- If default branch fails, fall back to `fallbackBranch`
 
 **For Pipelines and Input Sets:**
 - The list API does NOT return `fallbackBranch` for pipelines
-- Instead, use `loadFromFallbackBranch=true` query parameter when fetching data
-- Migration methods detect REMOTE pipelines with no branch info and automatically use this parameter
-- Input sets inherit this setting from their parent pipeline
+- Migration methods try default branch first using `get_default_branch()` API
+- If default branch fails, use `loadFromFallbackBranch=true` query parameter
+- Input sets inherit this behavior from their parent pipeline
 
 ### Resource-Specific Storage Methods
 

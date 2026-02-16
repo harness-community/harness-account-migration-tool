@@ -606,6 +606,58 @@ class HarnessAPIClient:
                 print(f"Failed to create project: {response.status_code} - {response.text}")
             return "failed"
     
+    def list_branches(self, connector_ref: str, repo_name: str, 
+                      org_identifier: Optional[str] = None, 
+                      project_identifier: Optional[str] = None) -> Optional[Dict]:
+        """List branches for a Git repository and get default branch
+        
+        Args:
+            connector_ref: The Git connector reference (e.g., 'account.myconnector')
+            repo_name: The repository name
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            
+        Returns:
+            Dict with 'branches' list and 'defaultBranch' info, or None if failed
+        """
+        endpoint = "/ng/api/scm/list-branches"
+        params = {
+            'connectorRef': connector_ref,
+            'repoName': repo_name,
+            'size': 100
+        }
+        if org_identifier:
+            params['orgIdentifier'] = org_identifier
+        if project_identifier:
+            params['projectIdentifier'] = project_identifier
+        
+        response = self._make_request('GET', endpoint, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('data', {})
+        return None
+    
+    def get_default_branch(self, connector_ref: str, repo_name: str,
+                          org_identifier: Optional[str] = None,
+                          project_identifier: Optional[str] = None) -> Optional[str]:
+        """Get the default branch for a Git repository
+        
+        Args:
+            connector_ref: The Git connector reference
+            repo_name: The repository name
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            
+        Returns:
+            The default branch name, or None if failed
+        """
+        branch_data = self.list_branches(connector_ref, repo_name, org_identifier, project_identifier)
+        if branch_data:
+            default_branch = branch_data.get('defaultBranch', {})
+            return default_branch.get('name')
+        return None
+
     def list_pipelines(self, org_identifier: Optional[str] = None, project_identifier: Optional[str] = None) -> List[Dict]:
         """List all pipelines with pagination support"""
         endpoint = "/pipeline/api/pipelines/list"
@@ -626,7 +678,7 @@ class HarnessAPIClient:
     
     def get_pipeline_data(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
                          project_identifier: Optional[str] = None, branch: Optional[str] = None,
-                         load_from_fallback_branch: bool = False) -> Optional[Dict]:
+                         load_from_fallback_branch: bool = False, silent: bool = False) -> Optional[Dict]:
         """Get pipeline data (for both GitX and Inline detection)
         
         Args:
@@ -636,6 +688,7 @@ class HarnessAPIClient:
             branch: Git branch for GitX resources on non-default branches (optional)
             load_from_fallback_branch: If True, load from fallback branch when default branch fails (optional)
                 See: https://apidocs.harness.io/pipelines/get-pipeline#pipelines/get-pipeline/request/query
+            silent: If True, suppress error messages (useful for retry logic)
         """
         endpoint = f"/pipeline/api/pipelines/{pipeline_identifier}"
         params = {}
@@ -656,7 +709,8 @@ class HarnessAPIClient:
             pipeline_data = data.get('data', {}).get('pipeline', data.get('data', {}))
             return pipeline_data
         else:
-            print(f"Failed to get pipeline data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get pipeline data: {response.status_code} - {response.text}")
             return None
     
     def get_pipeline_yaml(self, pipeline_identifier: str, org_identifier: Optional[str] = None, 
@@ -771,7 +825,8 @@ class HarnessAPIClient:
     
     def get_input_set_data(self, input_set_identifier: str, pipeline_identifier: str,
                           org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
-                          load_from_fallback_branch: bool = False) -> Optional[Dict]:
+                          branch: Optional[str] = None, load_from_fallback_branch: bool = False,
+                          silent: bool = False) -> Optional[Dict]:
         """Get input set data - returns full data dict (for both GitX and Inline detection)
         
         Args:
@@ -779,7 +834,9 @@ class HarnessAPIClient:
             pipeline_identifier: The parent pipeline identifier
             org_identifier: Organization identifier (optional)
             project_identifier: Project identifier (optional)
+            branch: Git branch for GitX resources on non-default branches (optional)
             load_from_fallback_branch: If True, load from fallback branch when default branch fails (optional)
+            silent: If True, suppress error messages (useful for retry logic)
         """
         endpoint = f"/pipeline/api/inputSets/{input_set_identifier}"
         params = {
@@ -789,6 +846,8 @@ class HarnessAPIClient:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
+        if branch:
+            params['branch'] = branch
         if load_from_fallback_branch:
             params['loadFromFallbackBranch'] = 'true'
         
@@ -799,15 +858,17 @@ class HarnessAPIClient:
             # Return full data dict for GitX/Inline detection
             return data.get('data', {})
         else:
-            print(f"Failed to get input set data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get input set data: {response.status_code} - {response.text}")
             return None
     
     def get_input_set_yaml(self, input_set_identifier: str, pipeline_identifier: str,
                           org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
-                          load_from_fallback_branch: bool = False) -> Optional[str]:
+                          branch: Optional[str] = None, load_from_fallback_branch: bool = False) -> Optional[str]:
         """Get input set YAML string"""
         input_set_data = self.get_input_set_data(input_set_identifier, pipeline_identifier, org_identifier, 
-                                                  project_identifier, load_from_fallback_branch=load_from_fallback_branch)
+                                                  project_identifier, branch=branch, 
+                                                  load_from_fallback_branch=load_from_fallback_branch)
         if input_set_data:
             return input_set_data.get('inputSetYaml', '')
         return None
@@ -1012,7 +1073,8 @@ class HarnessAPIClient:
             return []
     
     def get_service_data(self, service_identifier: str, org_identifier: Optional[str] = None,
-                        project_identifier: Optional[str] = None, branch: Optional[str] = None) -> Optional[Dict]:
+                        project_identifier: Optional[str] = None, branch: Optional[str] = None,
+                        silent: bool = False) -> Optional[Dict]:
         """Get service data (for both GitX and Inline detection)
         
         Args:
@@ -1020,6 +1082,7 @@ class HarnessAPIClient:
             org_identifier: Organization identifier (optional)
             project_identifier: Project identifier (optional)
             branch: Git branch for GitX resources on non-default branches (optional)
+            silent: If True, suppress error messages (useful for retry logic)
         """
         endpoint = f"/ng/api/servicesV2/{service_identifier}"
         params = {}
@@ -1038,7 +1101,8 @@ class HarnessAPIClient:
             service_data = data.get('data', {}).get('service', data.get('data', {}))
             return service_data
         else:
-            print(f"Failed to get service data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get service data: {response.status_code} - {response.text}")
             return None
     
     def get_service_yaml(self, service_identifier: str, org_identifier: Optional[str] = None,
@@ -2869,7 +2933,8 @@ class HarnessAPIClient:
             return []
     
     def get_environment_data(self, environment_identifier: str, org_identifier: Optional[str] = None,
-                            project_identifier: Optional[str] = None, branch: Optional[str] = None) -> Optional[Dict]:
+                            project_identifier: Optional[str] = None, branch: Optional[str] = None,
+                            silent: bool = False) -> Optional[Dict]:
         """Get environment data (for both GitX and Inline detection)
         
         Args:
@@ -2877,6 +2942,7 @@ class HarnessAPIClient:
             org_identifier: Organization identifier (optional)
             project_identifier: Project identifier (optional)
             branch: Git branch for GitX resources on non-default branches (optional)
+            silent: If True, suppress error messages (useful for retry logic)
         """
         endpoint = f"/ng/api/environmentsV2/{environment_identifier}"
         params = {}
@@ -2895,7 +2961,8 @@ class HarnessAPIClient:
             env_data = data.get('data', {}).get('environment', data.get('data', {}))
             return env_data
         else:
-            print(f"Failed to get environment data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get environment data: {response.status_code} - {response.text}")
             return None
     
     def get_environment_yaml(self, environment_identifier: str, org_identifier: Optional[str] = None,
@@ -3126,7 +3193,7 @@ class HarnessAPIClient:
     
     def get_infrastructure_data(self, infrastructure_identifier: str, environment_identifier: str,
                                org_identifier: Optional[str] = None, project_identifier: Optional[str] = None,
-                               branch: Optional[str] = None) -> Optional[Dict]:
+                               branch: Optional[str] = None, silent: bool = False) -> Optional[Dict]:
         """Get infrastructure data (for both GitX and Inline detection)
         
         Args:
@@ -3135,6 +3202,7 @@ class HarnessAPIClient:
             org_identifier: Organization identifier (optional)
             project_identifier: Project identifier (optional)
             branch: Git branch for GitX resources on non-default branches (optional)
+            silent: If True, suppress error messages (useful for retry logic)
         """
         endpoint = f"/ng/api/infrastructures/{infrastructure_identifier}"
         params = {
@@ -3155,7 +3223,8 @@ class HarnessAPIClient:
             infra_data = data.get('data', {}).get('infrastructure', data.get('data', {}))
             return infra_data
         else:
-            print(f"Failed to get infrastructure data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get infrastructure data: {response.status_code} - {response.text}")
             return None
     
     def get_infrastructure_yaml(self, infrastructure_identifier: str, environment_identifier: str,
@@ -4261,13 +4330,41 @@ class HarnessMigrator:
                 # Extract branch from list metadata for GitX resources on non-default branches
                 # The branch field in entityGitDetails may be None for non-default branches,
                 # in which case the actual branch is stored in fallbackBranch
+                # However, if the fallbackBranch was merged to default, try default branch first
                 list_git_details = env_item.get('entityGitDetails') or env_item.get('gitDetails') or {}
-                branch = list_git_details.get('branch') or env_item.get('fallbackBranch')
+                branch = list_git_details.get('branch')
+                fallback_branch = env_item.get('fallbackBranch')
+                store_type = env_item.get('storeType', '')
+                connector_ref = env_item.get('connectorRef', '')
+                repo_name = list_git_details.get('repoName', '')
                 
-                # Get environment data to detect storage type
-                env_data = self.source_client.get_environment_data(
-                    identifier, org_id, project_id, branch=branch
-                )
+                # For REMOTE resources with no branch, try default branch first, then fallback
+                env_data = None
+                actual_branch = branch  # Track which branch we actually fetched from
+                if store_type == 'REMOTE' and not branch and fallback_branch:
+                    # Try default branch first (in case fallback was merged to default)
+                    default_branch = self.source_client.get_default_branch(
+                        connector_ref, repo_name, org_id, project_id
+                    )
+                    if default_branch:
+                        # Use silent=True since we'll retry with fallback if this fails
+                        env_data = self.source_client.get_environment_data(
+                            identifier, org_id, project_id, branch=default_branch, silent=True
+                        )
+                        if env_data:
+                            actual_branch = default_branch
+                    # If default branch failed, try fallback branch
+                    if not env_data:
+                        env_data = self.source_client.get_environment_data(
+                            identifier, org_id, project_id, branch=fallback_branch
+                        )
+                        if env_data:
+                            actual_branch = fallback_branch
+                else:
+                    # Use branch directly (either explicit branch or None for inline)
+                    env_data = self.source_client.get_environment_data(
+                        identifier, org_id, project_id, branch=branch
+                    )
                 
                 if not env_data:
                     print(f"  Failed to get data for environment {name}")
@@ -4287,11 +4384,14 @@ class HarnessMigrator:
                 
                 if is_gitx:
                     # GitX: Get git details for import
-                    git_details = env_data.get('entityGitDetails', {})
+                    git_details = env_data.get('entityGitDetails', {}).copy()
                     if not git_details:
                         print(f"  Failed to get git details for GitX environment {name}")
                         results['failed'] += 1
                         continue
+                    # Override branch with the actual branch we successfully fetched from
+                    if actual_branch:
+                        git_details['branch'] = actual_branch
                     # Also get YAML for export
                     yaml_content = env_data.get('yaml', '')
                     export_file = self.export_dir / f"environment_{identifier}{scope_suffix}.yaml"
@@ -4397,13 +4497,41 @@ class HarnessMigrator:
                     # Extract branch from list metadata for GitX resources on non-default branches
                     # The branch field in entityGitDetails may be None for non-default branches,
                     # in which case the actual branch is stored in fallbackBranch
+                    # However, if the fallbackBranch was merged to default, try default branch first
                     list_git_details = infra_item.get('entityGitDetails') or infra_item.get('gitDetails') or {}
-                    branch = list_git_details.get('branch') or infra_item.get('fallbackBranch')
+                    branch = list_git_details.get('branch')
+                    fallback_branch = infra_item.get('fallbackBranch')
+                    store_type = infra_item.get('storeType', '')
+                    connector_ref = infra_item.get('connectorRef', '')
+                    repo_name = list_git_details.get('repoName', '')
                     
-                    # Get infrastructure data to detect storage type
-                    infra_data = self.source_client.get_infrastructure_data(
-                        identifier, env_identifier, org_id, project_id, branch=branch
-                    )
+                    # For REMOTE resources with no branch, try default branch first, then fallback
+                    infra_data = None
+                    actual_branch = branch  # Track which branch we actually fetched from
+                    if store_type == 'REMOTE' and not branch and fallback_branch:
+                        # Try default branch first (in case fallback was merged to default)
+                        default_branch = self.source_client.get_default_branch(
+                            connector_ref, repo_name, org_id, project_id
+                        )
+                        if default_branch:
+                            # Use silent=True since we'll retry with fallback if this fails
+                            infra_data = self.source_client.get_infrastructure_data(
+                                identifier, env_identifier, org_id, project_id, branch=default_branch, silent=True
+                            )
+                            if infra_data:
+                                actual_branch = default_branch
+                        # If default branch failed, try fallback branch
+                        if not infra_data:
+                            infra_data = self.source_client.get_infrastructure_data(
+                                identifier, env_identifier, org_id, project_id, branch=fallback_branch
+                            )
+                            if infra_data:
+                                actual_branch = fallback_branch
+                    else:
+                        # Use branch directly (either explicit branch or None for inline)
+                        infra_data = self.source_client.get_infrastructure_data(
+                            identifier, env_identifier, org_id, project_id, branch=branch
+                        )
                     
                     if not infra_data:
                         print(f"  Failed to get data for infrastructure {name}")
@@ -4423,11 +4551,14 @@ class HarnessMigrator:
                     
                     if is_gitx:
                         # GitX: Get git details for import
-                        git_details = infra_data.get('entityGitDetails', {}) or infra_data.get('gitDetails', {})
+                        git_details = (infra_data.get('entityGitDetails', {}) or infra_data.get('gitDetails', {})).copy()
                         if not git_details:
                             print(f"  Failed to get git details for GitX infrastructure {name}")
                             results['failed'] += 1
                             continue
+                        # Override branch with the actual branch we successfully fetched from
+                        if actual_branch:
+                            git_details['branch'] = actual_branch
                         # Also get YAML for export
                         yaml_content = infra_data.get('yaml', '')
                         export_file = self.export_dir / f"infrastructure_{identifier}{scope_suffix}.yaml"
@@ -4509,13 +4640,41 @@ class HarnessMigrator:
                 # Extract branch from list metadata for GitX resources on non-default branches
                 # The branch field in entityGitDetails may be None for non-default branches,
                 # in which case the actual branch is stored in fallbackBranch
+                # However, if the fallbackBranch was merged to default, try default branch first
                 list_git_details = service_item.get('entityGitDetails') or service_item.get('gitDetails') or {}
-                branch = list_git_details.get('branch') or service_item.get('fallbackBranch')
+                branch = list_git_details.get('branch')
+                fallback_branch = service_item.get('fallbackBranch')
+                store_type = service_item.get('storeType', '')
+                connector_ref = service_item.get('connectorRef', '')
+                repo_name = list_git_details.get('repoName', '')
                 
-                # Get service data to detect storage type
-                service_data = self.source_client.get_service_data(
-                    identifier, org_id, project_id, branch=branch
-                )
+                # For REMOTE resources with no branch, try default branch first, then fallback
+                service_data = None
+                actual_branch = branch  # Track which branch we actually fetched from
+                if store_type == 'REMOTE' and not branch and fallback_branch:
+                    # Try default branch first (in case fallback was merged to default)
+                    default_branch = self.source_client.get_default_branch(
+                        connector_ref, repo_name, org_id, project_id
+                    )
+                    if default_branch:
+                        # Use silent=True since we'll retry with fallback if this fails
+                        service_data = self.source_client.get_service_data(
+                            identifier, org_id, project_id, branch=default_branch, silent=True
+                        )
+                        if service_data:
+                            actual_branch = default_branch
+                    # If default branch failed, try fallback branch
+                    if not service_data:
+                        service_data = self.source_client.get_service_data(
+                            identifier, org_id, project_id, branch=fallback_branch
+                        )
+                        if service_data:
+                            actual_branch = fallback_branch
+                else:
+                    # Use branch directly (either explicit branch or None for inline)
+                    service_data = self.source_client.get_service_data(
+                        identifier, org_id, project_id, branch=branch
+                    )
                 
                 if not service_data:
                     print(f"  Failed to get data for service {name}")
@@ -4535,11 +4694,14 @@ class HarnessMigrator:
                 
                 if is_gitx:
                     # GitX: Get git details for import
-                    git_details = service_data.get('entityGitDetails', {}) or service_data.get('gitDetails', {})
+                    git_details = (service_data.get('entityGitDetails', {}) or service_data.get('gitDetails', {})).copy()
                     if not git_details:
                         print(f"  Failed to get git details for GitX service {name}")
                         results['failed'] += 1
                         continue
+                    # Override branch with the actual branch we successfully fetched from
+                    if actual_branch:
+                        git_details['branch'] = actual_branch
                     # Also get YAML for export
                     yaml_content = service_data.get('yaml', '')
                     export_file = self.export_dir / f"service_{identifier}{scope_suffix}.yaml"
@@ -5959,19 +6121,42 @@ class HarnessMigrator:
                 # Extract branch from list metadata for GitX resources on non-default branches
                 # For pipelines, the list response doesn't include fallbackBranch like other resources
                 # Instead, we use loadFromFallbackBranch=true when branch is None for REMOTE pipelines
+                # However, if the fallbackBranch was merged to default, try default branch first
                 # See: https://apidocs.harness.io/pipelines/get-pipeline#pipelines/get-pipeline/request/query
                 list_git_details = pipeline_item.get('entityGitDetails') or pipeline_item.get('gitDetails') or {}
                 branch = list_git_details.get('branch')
                 store_type = pipeline_item.get('storeType', '')
+                connector_ref = pipeline_item.get('connectorRef', '')
+                repo_name = list_git_details.get('repoName', '')
                 
-                # For REMOTE pipelines with no branch info, use loadFromFallbackBranch
-                load_from_fallback = (store_type == 'REMOTE' and not branch)
-                
-                # Get pipeline data to detect storage type
-                pipeline_data = self.source_client.get_pipeline_data(
-                    identifier, org_id, project_id, branch=branch, 
-                    load_from_fallback_branch=load_from_fallback
-                )
+                # For REMOTE pipelines with no branch, try default branch first, then loadFromFallbackBranch
+                pipeline_data = None
+                actual_branch = branch  # Track which branch we actually fetched from
+                if store_type == 'REMOTE' and not branch:
+                    # Try default branch first (in case fallback was merged to default)
+                    default_branch = self.source_client.get_default_branch(
+                        connector_ref, repo_name, org_id, project_id
+                    )
+                    if default_branch:
+                        # Use silent=True since we'll retry with loadFromFallbackBranch if this fails
+                        pipeline_data = self.source_client.get_pipeline_data(
+                            identifier, org_id, project_id, branch=default_branch, silent=True
+                        )
+                        if pipeline_data:
+                            actual_branch = default_branch
+                    # If default branch failed, try loadFromFallbackBranch
+                    if not pipeline_data:
+                        pipeline_data = self.source_client.get_pipeline_data(
+                            identifier, org_id, project_id, load_from_fallback_branch=True
+                        )
+                        # When using loadFromFallbackBranch, get the actual branch from the response
+                        if pipeline_data:
+                            actual_branch = pipeline_data.get('gitDetails', {}).get('branch')
+                else:
+                    # Use branch directly (either explicit branch or None for inline)
+                    pipeline_data = self.source_client.get_pipeline_data(
+                        identifier, org_id, project_id, branch=branch
+                    )
                 
                 if not pipeline_data:
                     print(f"  Failed to get data for pipeline {name}")
@@ -5991,11 +6176,14 @@ class HarnessMigrator:
                 
                 if is_gitx:
                     # GitX: Get git details for import
-                    git_details = pipeline_data.get('gitDetails', {})
+                    git_details = pipeline_data.get('gitDetails', {}).copy()
                     if not git_details:
                         print(f"  Failed to get git details for GitX pipeline {name}")
                         results['failed'] += 1
                         continue
+                    # Override branch with the actual branch we successfully fetched from
+                    if actual_branch:
+                        git_details['branch'] = actual_branch
                     # Extract connector reference from pipeline data if present
                     connector_ref = pipeline_data.get('connectorRef')
                     if connector_ref:
@@ -6096,18 +6284,42 @@ class HarnessMigrator:
                 
                 # For pipelines, the list response doesn't include fallbackBranch
                 # Instead, we use loadFromFallbackBranch=true when branch is None for REMOTE pipelines
+                # However, if the fallbackBranch was merged to default, try default branch first
                 list_git_details = pipeline_item.get('entityGitDetails') or pipeline_item.get('gitDetails') or {}
                 pipeline_branch = list_git_details.get('branch')
                 pipeline_store_type = pipeline_item.get('storeType', '')
+                connector_ref = pipeline_item.get('connectorRef', '')
+                repo_name = list_git_details.get('repoName', '')
                 
-                # For REMOTE pipelines with no branch info, use loadFromFallbackBranch
-                load_from_fallback = (pipeline_store_type == 'REMOTE' and not pipeline_branch)
-                
-                # Get pipeline data to check if pipeline is GitX (input sets inherit GitX from pipeline)
-                pipeline_data = self.source_client.get_pipeline_data(
-                    pipeline_identifier, org_id, project_id, 
-                    load_from_fallback_branch=load_from_fallback
-                )
+                # For REMOTE pipelines with no branch, try default branch first, then loadFromFallbackBranch
+                pipeline_data = None
+                actual_pipeline_branch = pipeline_branch  # Track which branch we actually fetched from
+                default_branch = None
+                if pipeline_store_type == 'REMOTE' and not pipeline_branch:
+                    # Try default branch first (in case fallback was merged to default)
+                    default_branch = self.source_client.get_default_branch(
+                        connector_ref, repo_name, org_id, project_id
+                    )
+                    if default_branch:
+                        # Use silent=True since we'll retry with loadFromFallbackBranch if this fails
+                        pipeline_data = self.source_client.get_pipeline_data(
+                            pipeline_identifier, org_id, project_id, branch=default_branch, silent=True
+                        )
+                        if pipeline_data:
+                            actual_pipeline_branch = default_branch
+                    # If default branch failed, try loadFromFallbackBranch
+                    if not pipeline_data:
+                        pipeline_data = self.source_client.get_pipeline_data(
+                            pipeline_identifier, org_id, project_id, load_from_fallback_branch=True
+                        )
+                        # When using loadFromFallbackBranch, get the actual branch from the response
+                        if pipeline_data:
+                            actual_pipeline_branch = pipeline_data.get('gitDetails', {}).get('branch')
+                else:
+                    # Use branch directly (either explicit branch or None for inline)
+                    pipeline_data = self.source_client.get_pipeline_data(
+                        pipeline_identifier, org_id, project_id, branch=pipeline_branch
+                    )
                 pipeline_is_gitx = False
                 if pipeline_data:
                     pipeline_is_gitx = self.source_client.is_gitx_resource(pipeline_data)
@@ -6123,11 +6335,35 @@ class HarnessMigrator:
                     print(f"  Processing input set: {name} ({identifier})")
                     
                     # Get full input set data
-                    # Use loadFromFallbackBranch if parent pipeline is on non-default branch
-                    input_set_data = self.source_client.get_input_set_data(
-                        identifier, pipeline_identifier, org_id, project_id,
-                        load_from_fallback_branch=load_from_fallback
-                    )
+                    # Use the same branch strategy as the parent pipeline
+                    input_set_data = None
+                    actual_input_set_branch = pipeline_branch  # Track which branch we actually fetched from
+                    if pipeline_store_type == 'REMOTE' and not pipeline_branch:
+                        # Try default branch first (same as pipeline)
+                        if default_branch:
+                            # Use silent=True since we'll retry with loadFromFallbackBranch if this fails
+                            input_set_data = self.source_client.get_input_set_data(
+                                identifier, pipeline_identifier, org_id, project_id,
+                                branch=default_branch, silent=True
+                            )
+                            if input_set_data:
+                                actual_input_set_branch = default_branch
+                        # If default branch failed, try loadFromFallbackBranch
+                        if not input_set_data:
+                            input_set_data = self.source_client.get_input_set_data(
+                                identifier, pipeline_identifier, org_id, project_id,
+                                load_from_fallback_branch=True
+                            )
+                            # When using loadFromFallbackBranch, get the actual branch from the response
+                            if input_set_data:
+                                actual_input_set_branch = input_set_data.get('gitDetails', {}).get('branch')
+                    else:
+                        # Use pipeline branch directly
+                        input_set_data = self.source_client.get_input_set_data(
+                            identifier, pipeline_identifier, org_id, project_id,
+                            branch=pipeline_branch if pipeline_branch else None
+                        )
+                        actual_input_set_branch = pipeline_branch
                     
                     if not input_set_data:
                         print(f"    Failed to get data for input set {name}")
@@ -6147,11 +6383,14 @@ class HarnessMigrator:
                     
                     if is_gitx:
                         # GitX: Get git details for import
-                        git_details = input_set_data.get('gitDetails', {}) or input_set_data.get('entityGitDetails', {})
+                        git_details = (input_set_data.get('gitDetails', {}) or input_set_data.get('entityGitDetails', {})).copy()
                         if not git_details:
                             print(f"    Failed to get git details for GitX input set {name}")
                             results['failed'] += 1
                             continue
+                        # Override branch with the actual branch we successfully fetched from
+                        if actual_input_set_branch:
+                            git_details['branch'] = actual_input_set_branch
                         # Extract connector reference from pipeline data if present
                         connector_ref = pipeline_data.get('connectorRef') if pipeline_data else None
                         if connector_ref:

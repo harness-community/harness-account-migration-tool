@@ -349,6 +349,24 @@ The `is_gitx_resource()` method detects storage method by checking:
 
 GitX resources can be stored on non-default Git branches. The migration tool automatically handles these cases, but the approach differs by resource type.
 
+### Branch Resolution Strategy
+
+When a GitX resource has `branch: null` but a `fallbackBranch` is present, the resource may exist on either:
+1. The **default branch** (if the fallback branch was merged)
+2. The **fallback branch** (if it hasn't been merged yet)
+
+The migration tool tries the **default branch first**, then falls back to the fallback branch:
+
+1. Get the default branch using the `list-branches` API
+2. Try fetching the resource from the default branch
+3. If that fails, try fetching from the fallback branch (or use `loadFromFallbackBranch=true` for pipelines/input sets)
+
+**API for getting default branch:**
+```python
+# GET /ng/api/scm/list-branches
+default_branch = client.get_default_branch(connector_ref, repo_name, org_id, project_id)
+```
+
 ### Branch Detection from List Response
 
 **For Environments, Infrastructures, and Services:**
@@ -358,7 +376,19 @@ GitX resources can be stored on non-default Git branches. The migration tool aut
 - **Extraction pattern**:
   ```python
   list_git_details = item.get('entityGitDetails') or item.get('gitDetails') or {}
-  branch = list_git_details.get('branch') or item.get('fallbackBranch')
+  branch = list_git_details.get('branch')
+  fallback_branch = item.get('fallbackBranch')
+  connector_ref = item.get('connectorRef', '')
+  repo_name = list_git_details.get('repoName', '')
+  
+  if store_type == 'REMOTE' and not branch and fallback_branch:
+      # Try default branch first
+      default_branch = client.get_default_branch(connector_ref, repo_name, org_id, project_id)
+      if default_branch:
+          data = client.get_environment_data(identifier, org_id, project_id, branch=default_branch)
+      if not data:
+          # Fall back to fallbackBranch
+          data = client.get_environment_data(identifier, org_id, project_id, branch=fallback_branch)
   ```
 
 **For Pipelines and Input Sets:**
@@ -369,7 +399,15 @@ GitX resources can be stored on non-default Git branches. The migration tool aut
   list_git_details = item.get('entityGitDetails') or item.get('gitDetails') or {}
   branch = list_git_details.get('branch')
   store_type = item.get('storeType', '')
-  load_from_fallback = (store_type == 'REMOTE' and not branch)
+  
+  if store_type == 'REMOTE' and not branch:
+      # Try default branch first
+      default_branch = client.get_default_branch(connector_ref, repo_name, org_id, project_id)
+      if default_branch:
+          data = client.get_pipeline_data(identifier, org_id, project_id, branch=default_branch)
+      if not data:
+          # Fall back to loadFromFallbackBranch
+          data = client.get_pipeline_data(identifier, org_id, project_id, load_from_fallback_branch=True)
   ```
 
 ### API Parameters for Non-Default Branches
