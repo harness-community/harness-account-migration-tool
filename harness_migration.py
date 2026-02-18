@@ -1217,11 +1217,21 @@ class HarnessAPIClient:
     
     def get_override_data(self, override_identifier: str, org_identifier: Optional[str] = None,
                          project_identifier: Optional[str] = None, 
-                         repo_name: Optional[str] = None, load_from_fallback_branch: bool = False) -> Optional[Dict]:
+                         repo_name: Optional[str] = None, branch: Optional[str] = None,
+                         load_from_fallback_branch: bool = False, silent: bool = False) -> Optional[Dict]:
         """Get override data using GET endpoint
         
         Uses GET /ng/api/serviceOverrides/{identifier}
-        For GitX overrides, requires repoName and loadFromFallbackBranch parameters
+        For GitX overrides, requires repoName and branch or loadFromFallbackBranch parameters
+        
+        Args:
+            override_identifier: The override identifier
+            org_identifier: Organization identifier (optional)
+            project_identifier: Project identifier (optional)
+            repo_name: Repository name for GitX overrides (optional)
+            branch: Git branch for GitX overrides on non-default branches (optional)
+            load_from_fallback_branch: If True, load from fallback branch when default branch fails (optional)
+            silent: If True, suppress error messages (useful for retry logic)
         """
         endpoint = f"/ng/api/serviceOverrides/{override_identifier}"
         params = {}
@@ -1230,10 +1240,13 @@ class HarnessAPIClient:
         if project_identifier:
             params['projectIdentifier'] = project_identifier
         
-        # For GitX overrides, add repoName and loadFromFallbackBranch
+        # For GitX overrides, add repoName and branch or loadFromFallbackBranch
         if repo_name:
             params['repoName'] = repo_name
-            params['loadFromFallbackBranch'] = 'true' if load_from_fallback_branch else 'false'
+            if branch:
+                params['branch'] = branch
+            elif load_from_fallback_branch:
+                params['loadFromFallbackBranch'] = 'true'
         
         response = self._make_request('GET', endpoint, params=params)
         
@@ -1243,7 +1256,8 @@ class HarnessAPIClient:
             override_data = data.get('data', {})
             return override_data
         else:
-            print(f"Failed to get override data: {response.status_code} - {response.text}")
+            if not silent:
+                print(f"Failed to get override data: {response.status_code} - {response.text}")
             return None
     
     def get_override_yaml(self, override_identifier: str, org_identifier: Optional[str] = None,
@@ -1341,8 +1355,8 @@ class HarnessAPIClient:
         }
         
         # Add optional fields if present
-        if 'infraIdentifier' in override_data:
-            request_body['infraIdentifier'] = override_data['infraIdentifier']
+        if 'identifier' in override_data:
+            request_body['identifier'] = override_data['identifier']
         if 'serviceRef' in override_data:
             request_body['serviceRef'] = override_data['serviceRef']
         
@@ -4798,17 +4812,55 @@ class HarnessMigrator:
                     identifier, org_id, project_id
                 )
                 
+                actual_branch = None  # Track which branch we actually fetched from
+                
                 # If GET succeeded and we got entityGitInfo, it's GitX - re-fetch with repoName for complete data
                 if override_data and override_data.get('entityGitInfo'):
                     entity_git_info = override_data.get('entityGitInfo', {})
                     repo_name = entity_git_info.get('repoName')
+                    connector_ref = override_data.get('connectorRef', '')
+                    branch = entity_git_info.get('branch')
+                    fallback_branch = entity_git_info.get('fallbackBranch')
+                    
                     if repo_name:
-                        # Re-fetch with repoName to get complete GitX data
-                        override_data = self.source_client.get_override_data(
-                            identifier, org_id, project_id,
-                            repo_name=repo_name,
-                            load_from_fallback_branch=True
-                        )
+                        # For GitX overrides with no branch, try default branch first, then fallback
+                        if not branch and fallback_branch:
+                            # Try default branch first (in case fallback was merged to default)
+                            default_branch = self.source_client.get_default_branch(
+                                connector_ref, repo_name, org_id, project_id
+                            )
+                            if default_branch:
+                                # Use silent=True since we'll retry with fallback if this fails
+                                override_data = self.source_client.get_override_data(
+                                    identifier, org_id, project_id,
+                                    repo_name=repo_name, branch=default_branch, silent=True
+                                )
+                                if override_data:
+                                    actual_branch = default_branch
+                            # If default branch failed, try loadFromFallbackBranch
+                            if not override_data:
+                                override_data = self.source_client.get_override_data(
+                                    identifier, org_id, project_id,
+                                    repo_name=repo_name, load_from_fallback_branch=True
+                                )
+                                if override_data:
+                                    # Get actual branch from response
+                                    actual_branch = override_data.get('entityGitInfo', {}).get('branch')
+                        elif branch:
+                            # Branch is specified, use it directly
+                            override_data = self.source_client.get_override_data(
+                                identifier, org_id, project_id,
+                                repo_name=repo_name, branch=branch
+                            )
+                            actual_branch = branch
+                        else:
+                            # No branch info, try loadFromFallbackBranch
+                            override_data = self.source_client.get_override_data(
+                                identifier, org_id, project_id,
+                                repo_name=repo_name, load_from_fallback_branch=True
+                            )
+                            if override_data:
+                                actual_branch = override_data.get('entityGitInfo', {}).get('branch')
                 
                 # If GET failed, try using data from list (might be incomplete for GitX)
                 if not override_data:
@@ -4839,9 +4891,10 @@ class HarnessMigrator:
                         continue
                     
                     # Extract git details from entityGitInfo
+                    # Use actual_branch if we tracked it during fetch, otherwise use branch from entityGitInfo
                     git_details = {
                         'repoName': entity_git_info.get('repoName'),
-                        'branch': entity_git_info.get('branch'),
+                        'branch': actual_branch if actual_branch else entity_git_info.get('branch'),
                         'filePath': entity_git_info.get('filePath')
                     }
                     
