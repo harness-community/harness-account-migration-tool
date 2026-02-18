@@ -53,7 +53,9 @@ python harness_migration.py \
 - `--project-identifier`: Filter to specific project
 - `--resource-types`: List of resource types to migrate (default: all)
 - `--exclude-resource-types`: List of resource types to exclude (takes precedence over `--resource-types`)
-- `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`)
+- `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`). Used for both source and destination unless specific URLs are provided.
+- `--source-base-url`: Source Harness API base URL (overrides `--base-url` for source). Use for different Harness instances like `https://prod7.harness.io/gateway`.
+- `--dest-base-url`: Destination Harness API base URL (overrides `--base-url` for destination). Use for different Harness instances like `https://prod7.harness.io/gateway`.
 - `--dry-run`: List and export resources without migrating (or preview import without creating)
 - `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
 - `--import-from-exports`: Import resources from previously exported JSON files instead of migrating from source account

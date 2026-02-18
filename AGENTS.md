@@ -345,7 +345,9 @@ Dry-run mode allows testing without making changes:
 - `--org-identifier`: Filter to specific organization (optional)
 - `--project-identifier`: Filter to specific project (optional)
 - `--resource-types`: List of resource types to migrate (default: all)
-- `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`)
+- `--base-url`: Harness API base URL (default: `https://app.harness.io/gateway`). Used for both source and destination unless specific URLs are provided.
+- `--source-base-url`: Source Harness API base URL (overrides `--base-url` for source)
+- `--dest-base-url`: Destination Harness API base URL (overrides `--base-url` for destination)
 - `--dry-run`: Enable dry-run mode
 - `--config`: Path to YAML configuration file for HTTP settings (proxy, custom headers, etc.)
 - `--import-from-exports`: Import resources from previously exported JSON files (directory path)

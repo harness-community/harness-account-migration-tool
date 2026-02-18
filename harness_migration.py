@@ -7141,7 +7141,11 @@ def main():
                        default=[],
                        help='Resource types to exclude from migration (takes precedence over --resource-types)')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
-                       help='Harness API base URL')
+                       help='Harness API base URL (used for both source and destination if specific URLs not provided)')
+    parser.add_argument('--source-base-url',
+                       help='Source Harness API base URL (overrides --base-url for source)')
+    parser.add_argument('--dest-base-url',
+                       help='Destination Harness API base URL (overrides --base-url for destination)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Dry run mode: list and export resources without migrating')
     parser.add_argument('--config', dest='config_file',
@@ -7155,6 +7159,10 @@ def main():
     
     # Load HTTP configuration from file if specified
     http_config = HTTPConfig.from_file(args.config_file) if args.config_file else HTTPConfig()
+    
+    # Determine base URLs for source and destination
+    source_base_url = args.source_base_url or args.base_url
+    dest_base_url = args.dest_base_url or args.base_url
     
     # Determine mode: import from exports vs. normal migration
     import_mode = args.import_dir is not None
@@ -7174,7 +7182,7 @@ def main():
                 dest_account_id = extract_account_id_from_api_key(args.dest_api_key)
             except ValueError as e:
                 parser.error(f"Invalid destination API key: {e}")
-            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config, debug=args.debug)
+            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, dest_base_url, http_config, debug=args.debug)
     else:
         # Normal migration mode - source API key required
         if not args.source_api_key:
@@ -7196,10 +7204,10 @@ def main():
                 parser.error(f"Invalid destination API key: {e}")
         
         # Create API clients (account ID will be extracted from API key if not provided)
-        source_client = HarnessAPIClient(args.source_api_key, source_account_id, args.base_url, http_config, debug=args.debug)
+        source_client = HarnessAPIClient(args.source_api_key, source_account_id, source_base_url, http_config, debug=args.debug)
         dest_client = None
         if not args.dry_run:
-            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, args.base_url, http_config, debug=args.debug)
+            dest_client = HarnessAPIClient(args.dest_api_key, dest_account_id, dest_base_url, http_config, debug=args.debug)
     
     # Apply exclusions: remove excluded resource types from the list
     # Exclusions take precedence over inclusions
