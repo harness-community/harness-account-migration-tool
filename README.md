@@ -346,6 +346,10 @@ timeout: 30
 - Verify the resource type is included (not excluded)
 - Ensure the resource exists in the source account at the specified scope
 
+### IACM Workspace Secret Variables
+
+Harness redacts secret variable values from workspace responses. The tool substitutes `changeme` for any redacted values and prints a warning. You must update these manually in the destination workspace after migration.
+
 ### Proxy/Network Issues
 
 - Verify proxy URL is correct and accessible
