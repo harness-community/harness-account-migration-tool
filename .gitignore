@@ -12,6 +12,9 @@ ENV/
 # Exported YAML files
 harness_exports/
 
+# Migration reports
+migration_report.txt
+
 # API Keys and sensitive data
 *.key
 *.env

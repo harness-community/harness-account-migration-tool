@@ -392,3 +392,57 @@ Most GitX imports use query parameters only (no request body):
   - **Storage Method**: Always Inline (NOT stored in GitX)
   - **Health Sources**: Part of monitored services, added via PUT update to monitored service
 
+## IACM API Endpoints
+
+All IACM endpoints share these characteristics:
+- **Base path**: `/iacm/api/`
+- **Authentication**: `x-api-key` header (same as all other endpoints)
+- **Account scoping**: `accountIdentifier` query parameter on all requests
+- **Pagination**: `page` (1-based) and `limit` parameters; response is a direct JSON array (no wrapper object)
+- **Storage Method**: Always Inline (NOT stored in GitX)
+
+### IACM Modules
+- **Scope**: Account, Organization, and Project levels (controlled by optional `org` and `project` fields in request body)
+- `GET /iacm/api/modules` - List all modules visible to the account
+  - Query parameters: `accountIdentifier`, `page` (1-based), `limit`
+  - Response: Direct JSON array of module objects
+- `POST /iacm/api/modules` - Create a module
+  - Query parameters: `accountIdentifier`
+  - Request body: JSON with writable fields: `name`, `system`, `repository`, `repository_branch`, `repository_connector`, `repository_path`, `org`, `project`, `git_tag_style`, `storage_type`, `testing_enabled`, `description`, `tags`
+  - **Note**: `org` and `project` in the body control scope (omit both for account-level, include `org` for org-level, include both for project-level)
+  - **Rate limiting**: IACM module API has stricter rate limits; creation retries up to 4 times with exponential backoff (2s → 4s → 8s)
+
+### IACM Workspaces
+- **Scope**: Project-level only
+- `GET /iacm/api/orgs/{org}/projects/{project}/workspaces` - List workspaces in a project
+  - Query parameters: `accountIdentifier`, `page` (1-based), `limit`
+  - Response: Direct JSON array of workspace summary objects
+- `GET /iacm/api/orgs/{org}/projects/{project}/workspaces/{workspace_id}` - Get workspace detail
+  - Query parameters: `accountIdentifier`
+  - Response: Full workspace object (required for create — list response omits some fields)
+- `POST /iacm/api/orgs/{org}/projects/{project}/workspaces` - Create a workspace
+  - Query parameters: `accountIdentifier`
+  - Request body: JSON with writable fields: `identifier`, `name`, `description`, `provisioner`, `provisioner_version`, `provider_connector`, `provider_connectors`, `repository`, `repository_branch`, `repository_connector`, `repository_path`, `repository_submodules`, `terraform_variables`, `environment_variables`, `terraform_variable_files`, `default_pipelines`, `variable_sets`, `tags`, `cost_estimation_enabled`, `prune_sensitive_data`, `backend_locked`, `budget`, `run_all`
+  - **Note**: `provider_connectors` entries have `created`/`updated` timestamps stripped before sending (API rejects them)
+  - **Note**: `terraform_variables` and `environment_variables` default to `{}` if absent
+  - **Secret variables**: Harness redacts secret variable values in GET responses — the tool substitutes `changeme` for any redacted values; these must be updated manually after migration
+
+### IACM Variable Sets
+- **Scope**: Project-level only
+- `GET /iacm/api/orgs/{org}/projects/{project}/variable-sets` - List variable sets
+  - Query parameters: `accountIdentifier`, `page` (1-based), `limit`
+  - Response: Direct JSON array of variable set objects
+
+### IACM Workspace Terraform State
+- **Scope**: Project-level only (per workspace)
+- `GET /iacm/api/orgs/{org}/projects/{project}/workspaces/{workspace_id}/terraform-backend` - Download terraform state
+  - Query parameters: `accountIdentifier`
+  - Response: Raw terraform state JSON as plain text (not wrapped in a JSON envelope)
+  - Returns HTTP 404 if the workspace has no state — treat as "no state to migrate" (not an error)
+  - Returns empty body if state exists but is empty — also skip silently
+- `POST /iacm/api/orgs/{org}/projects/{project}/workspaces/{workspace_id}/terraform-backend` - Upload terraform state
+  - Query parameters: `accountIdentifier`
+  - Request body: Raw terraform state JSON string (same content returned by GET)
+  - Success: HTTP 200, 201, or 204
+  - **Note**: Both download and upload retry up to 4 times with exponential backoff (2s → 4s → 8s) on transient failures
+

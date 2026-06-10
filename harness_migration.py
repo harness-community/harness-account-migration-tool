@@ -12,7 +12,8 @@ import yaml
 import os
 import sys
 import re
-from typing import Dict, List, Optional, Any, Union
+import io
+from typing import Dict, List, Optional, Any, Tuple, Union
 from pathlib import Path
 import time
 import argparse
@@ -369,37 +370,21 @@ class HarnessAPIClient:
     def _fetch_paginated(self, method: str, endpoint: str, params: Optional[Dict] = None,
                         data: Optional[Union[Dict, str]] = None, page_size: int = 100,
                         page_param_name: str = 'page', size_param_name: str = 'size',
-                        content_path: str = 'data.content', total_pages_path: str = 'data.totalPages',
-                        total_elements_path: str = 'data.totalElements',
+                        content_path: str = 'data.content',
+                        total_pages_path: str = '', total_elements_path: str = '',
                         pagination_in_body: bool = False, headers: Optional[Dict] = None,
-                        use_offset: bool = False) -> List[Dict]:
+                        use_offset: bool = False, start_page: int = 0) -> List[Dict]:
         """
-        Fetch all pages of a paginated API endpoint
-        
-        Args:
-            method: HTTP method ('GET' or 'POST')
-            endpoint: API endpoint path
-            params: Query parameters (will be updated with pagination params if pagination_in_body=False)
-            data: Request body data (for POST requests, will be updated with pagination params if pagination_in_body=True)
-            page_size: Number of items per page
-            page_param_name: Name of the page parameter (default: 'page')
-            size_param_name: Name of the size parameter (default: 'size')
-            content_path: JSON path to the content array (default: 'data.content'). Use empty string '' for direct array responses
-            total_pages_path: JSON path to total pages count (default: 'data.totalPages'). Use empty string '' if not available
-            total_elements_path: JSON path to total elements count (default: 'data.totalElements')
-            pagination_in_body: If True, pagination params go in request body; if False, in query params (default: False)
-            headers: Optional custom headers to include in requests
-            use_offset: If True, pagination value is calculated as offset = page * page_size; if False, uses page number directly (default: False)
-        
-        Returns:
-            List of all items across all pages
+        Fetch all pages of a paginated API endpoint.
+
+        Pagination terminates when a page returns fewer items than page_size.
         """
         all_items = []
-        page = 0
-        
+        page = start_page
+
         if params is None:
             params = {}
-        
+
         while True:
             # Set pagination parameters in the appropriate location
             if use_offset:
@@ -446,35 +431,13 @@ class HarnessAPIClient:
             
             if not isinstance(content, list):
                 content = []
-            
+
             all_items.extend(content)
-            
-            # Check if there are more pages
-            # Try to get total pages from response
-            total_pages = None
-            try:
-                total_pages_obj = response_data
-                for key in total_pages_path.split('.'):
-                    if isinstance(total_pages_obj, dict):
-                        total_pages_obj = total_pages_obj.get(key)
-                    else:
-                        total_pages_obj = None
-                        break
-                if isinstance(total_pages_obj, (int, float)):
-                    total_pages = int(total_pages_obj)
-            except Exception:
-                pass
-            
-            # If we got fewer items than page_size, we're done
+
+            # If we got fewer items than page_size, we've reached the last page
             if len(content) < page_size:
                 break
-            
-            # If we have total_pages info, check if we've reached the last page
-            if total_pages is not None and page >= total_pages - 1:
-                break
-            
-            # If we got exactly page_size items, there might be more pages
-            # Continue to next page
+
             page += 1
             
             # Safety limit to prevent infinite loops
@@ -668,10 +631,10 @@ class HarnessAPIClient:
             params['projectIdentifier'] = project_identifier
         
         try:
-            # Pipelines API uses pagination in request body
+            # Pipelines API requires pagination in query params, not body
             return self._fetch_paginated('POST', endpoint, params=params, data={
                 'filterType': 'PipelineSetup'
-            }, pagination_in_body=True)
+            }, pagination_in_body=False)
         except Exception as e:
             print(f"Failed to list pipelines: {e}")
             return []
@@ -2626,9 +2589,7 @@ class HarnessAPIClient:
         endpoint = "/cv/api/monitored-service"
         params = {
             'routingId': self.account_id,
-            'accountId': self.account_id,  # Required by monitored service API
-            'offset': 0,
-            'pageSize': 10,
+            'accountId': self.account_id,
             'filter': '',
             'servicesAtRiskFilter': 'false'
         }
@@ -2636,22 +2597,14 @@ class HarnessAPIClient:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
-        
+
         try:
-            # Remove offset and pageSize from params - _fetch_paginated will handle them
-            # Note: monitored services uses pageSize=10 by default, but we'll use 100 for efficiency
-            params.pop('offset', None)
-            page_size = params.pop('pageSize', 100)
-            
-            # Use _fetch_paginated helper
-            # Pagination uses offset and pageSize (offset-based, not page-based)
-            # Response is nested: data.content array
             return self._fetch_paginated(
                 'GET', endpoint, params=params,
                 page_param_name='offset',
                 size_param_name='pageSize',
                 content_path='data.content',
-                page_size=page_size,
+                page_size=100,
                 use_offset=True
             )
         except Exception as e:
@@ -3417,21 +3370,22 @@ class HarnessAPIClient:
     def create_secret(self, secret_data: Dict, org_identifier: Optional[str] = None,
                      project_identifier: Optional[str] = None, dry_run: bool = False) -> bool:
         """Create secret from secret data using v2 API
-        
+
         Based on Harness API docs: https://apidocs.harness.io/secrets
         Uses POST endpoint: Creates a Secret at given Scope
-        
+
         For secrets stored in harnessSecretManager, the value cannot be migrated,
         so a dummy value of "changeme" is used instead.
+        For SecretFile types, a placeholder file is uploaded via multipart/form-data.
         """
         # Remove read-only fields
         cleaned_data = clean_for_creation(secret_data)
-        
+
         # Check if secret uses harnessSecretManager
         # secretManagerIdentifier is in the spec dictionary, not at top level
         spec = cleaned_data.get('spec', {})
         secret_manager_identifier = spec.get('secretManagerIdentifier', '')
-        
+
         # harnessSecretManager can exist at different levels:
         # - account.harnessSecretManager (account level)
         # - org.harnessSecretManager (org level)
@@ -3441,28 +3395,27 @@ class HarnessAPIClient:
             secret_manager_identifier == 'account.harnessSecretManager' or
             secret_manager_identifier == 'org.harnessSecretManager'
         )
-        
-        if is_harness_secret_manager:
-            # For harnessSecretManager, we cannot migrate the value
+
+        secret_type = cleaned_data.get('type', '')
+        is_secret_file = secret_type == 'SecretFile'
+
+        if is_harness_secret_manager and not is_secret_file:
+            # For harnessSecretManager text secrets, we cannot migrate the value
             # Set a dummy value that the user must change
             if 'spec' in cleaned_data:
                 cleaned_data['spec']['value'] = 'changeme'
-        
-        # Prepare the request body - v2 API expects secret object
-        request_body = {
-            'secret': cleaned_data
-        }
-        
+
         if dry_run:
             secret_name = cleaned_data.get('name', cleaned_data.get('identifier', 'Unknown'))
             secret_id = cleaned_data.get('identifier', 'Unknown')
-            secret_type = cleaned_data.get('type', 'Unknown')
             print(f"  [DRY RUN] Would create secret: {secret_name} ({secret_id}) type: {secret_type}")
             if is_harness_secret_manager:
-                print(f"  [DRY RUN] Note: Secret uses harnessSecretManager ({secret_manager_identifier}), value will be set to 'changeme'")
+                if is_secret_file:
+                    print(f"  [DRY RUN] Note: SecretFile uses harnessSecretManager ({secret_manager_identifier}), a placeholder file will be uploaded - please update manually")
+                else:
+                    print(f"  [DRY RUN] Note: Secret uses harnessSecretManager ({secret_manager_identifier}), value will be set to 'changeme'")
             return True
-        
-        endpoint = "/ng/api/v2/secrets"
+
         params = {
             'routingId': self.account_id
         }
@@ -3470,15 +3423,27 @@ class HarnessAPIClient:
             params['orgIdentifier'] = org_identifier
         if project_identifier:
             params['projectIdentifier'] = project_identifier
-        
-        response = self._make_request('POST', endpoint, params=params, data=request_body)
-        
+
         identifier = cleaned_data.get('identifier', 'unknown')
-        
+
+        # SecretFile types require multipart/form-data upload
+        if is_secret_file and is_harness_secret_manager:
+            response = self._create_secret_file(cleaned_data, params)
+        else:
+            # Prepare the request body - v2 API expects secret object
+            request_body = {
+                'secret': cleaned_data
+            }
+            endpoint = "/ng/api/v2/secrets"
+            response = self._make_request('POST', endpoint, params=params, data=request_body)
+
         if response.status_code in [200, 201]:
             print(f"Successfully created secret")
             if is_harness_secret_manager:
-                print(f"  Warning: Secret uses harnessSecretManager ({secret_manager_identifier}), value set to 'changeme' - please update manually")
+                if is_secret_file:
+                    print(f"  Warning: SecretFile uses harnessSecretManager ({secret_manager_identifier}), placeholder file uploaded - please update with actual file manually")
+                else:
+                    print(f"  Warning: Secret uses harnessSecretManager ({secret_manager_identifier}), value set to 'changeme' - please update manually")
             return "success"
         else:
             if is_resource_already_exists_error(response.status_code, response.text):
@@ -3488,6 +3453,68 @@ class HarnessAPIClient:
             else:
                 print(f"Failed to create secret: {response.status_code} - {response.text}")
             return "failed"
+
+    def _create_secret_file(self, cleaned_data: Dict, params: Dict) -> requests.Response:
+        """Create a SecretFile type secret using multipart/form-data upload.
+
+        Harness API requires POST /ng/api/v2/secrets/files with:
+        - 'spec' part: JSON string of the secret spec
+        - 'file' part: the actual file content (placeholder for migration)
+        """
+
+        endpoint = "/ng/api/v2/secrets/files"
+        url = f"{self.base_url}{endpoint}"
+
+        params['accountIdentifier'] = self.account_id
+
+        # Build the secret spec JSON for the multipart 'spec' field
+        secret_spec = {
+            'secret': {
+                'type': 'SecretFile',
+                'name': cleaned_data.get('name', ''),
+                'identifier': cleaned_data.get('identifier', ''),
+                'description': cleaned_data.get('description', ''),
+                'tags': cleaned_data.get('tags', {}),
+                'spec': {
+                    'secretManagerIdentifier': cleaned_data.get('spec', {}).get('secretManagerIdentifier', 'harnessSecretManager')
+                }
+            }
+        }
+
+        # Create a placeholder file with dummy content
+        placeholder_content = b'PLACEHOLDER - replace with actual secret file content'
+
+        # Multipart form: 'spec' as JSON string, 'file' as file upload
+        files = {
+            'spec': (None, json.dumps(secret_spec), 'application/json'),
+            'file': ('placeholder.pem', io.BytesIO(placeholder_content), 'application/octet-stream')
+        }
+
+        timeout = self.http_config.timeout
+
+        # Make request without Content-Type header (let requests set multipart boundary)
+        request_headers = {}
+        if 'Content-Type' in self.session.headers:
+            # Temporarily remove Content-Type so requests can set multipart boundary
+            request_headers['Content-Type'] = None
+
+        if self.debug:
+            print(f"\n[DEBUG] Creating SecretFile via multipart upload")
+            print(f"  URL: {url}")
+            print(f"  Spec: {json.dumps(secret_spec, indent=2)}")
+
+        response = self.session.post(
+            url,
+            headers=request_headers,
+            params=params,
+            files=files,
+            timeout=timeout
+        )
+
+        if self.debug:
+            self._debug_log_response(response)
+
+        return response
     
     def get_template_versions(self, template_identifier: str, org_identifier: Optional[str] = None,
                               project_identifier: Optional[str] = None) -> List[Dict]:
@@ -3682,6 +3709,188 @@ class HarnessAPIClient:
             else:
                 print(f"Failed to import template version {version} from GitX: {response.status_code} - {response.text}")
             return "failed"
+
+    # ---------- IACM (modules / workspaces / variable-sets) ----------
+    #
+    # IACM endpoints use 1-indexed `page` plus `limit` and return flat arrays
+    # (or `{}` when empty), so they call `_fetch_paginated` with start_page=1
+    # and content_path=''.
+
+    _MODULE_WRITABLE_FIELDS = {
+        "name",
+        "system",
+        "repository",
+        "repository_branch",
+        "repository_connector",
+        "repository_path",
+        "org",
+        "project",
+        "git_tag_style",
+        "storage_type",
+        "testing_enabled",
+        "description",
+        "tags",
+    }
+
+    _WORKSPACE_WRITABLE_FIELDS = {
+        "identifier",
+        "name",
+        "description",
+        "provisioner",
+        "provisioner_version",
+        "provider_connector",
+        "provider_connectors",
+        "repository",
+        "repository_branch",
+        "repository_connector",
+        "repository_path",
+        "repository_submodules",
+        "terraform_variables",
+        "environment_variables",
+        "terraform_variable_files",
+        "default_pipelines",
+        "variable_sets",
+        "tags",
+        "cost_estimation_enabled",
+        "prune_sensitive_data",
+        "backend_locked",
+        "budget",
+        "run_all",
+    }
+
+    def _fetch_iacm_paginated(self, endpoint: str, params: Optional[Dict] = None,
+                              page_size: int = 50) -> List[Dict]:
+        """Wrapper around _fetch_paginated configured for IACM list endpoints."""
+        return self._fetch_paginated(
+            'GET', endpoint,
+            params=params or {},
+            page_size=page_size,
+            page_param_name='page',
+            size_param_name='limit',
+            content_path='',
+            total_pages_path='',
+            start_page=1,
+        )
+
+    def list_modules(self) -> List[Dict]:
+        """List every IACM module visible to the account (all scopes)."""
+        try:
+            return self._fetch_iacm_paginated("/iacm/api/modules")
+        except Exception as e:
+            print(f"Failed to list modules: {e}")
+            return []
+
+    def create_module(self, module_data: Dict) -> str:
+        """Create an IACM module. Returns 'success' | 'skipped' | 'failed'."""
+        body = {k: v for k, v in module_data.items()
+                if k in self._MODULE_WRITABLE_FIELDS and v is not None}
+        response = self._make_request('POST', "/iacm/api/modules", data=body)
+        if response.status_code in (200, 201):
+            return "success"
+        if is_resource_already_exists_error(response.status_code, response.text):
+            print(f"  Module '{body.get('name', '?')}' already exists. Skipping.")
+            return "skipped"
+        print(f"Failed to create module '{body.get('name', '?')}': "
+              f"{response.status_code} - {response.text}")
+        return "failed"
+
+    def list_workspaces(self, org_id: str, project_id: str) -> List[Dict]:
+        endpoint = f"/iacm/api/orgs/{org_id}/projects/{project_id}/workspaces"
+        try:
+            return self._fetch_iacm_paginated(endpoint)
+        except Exception as e:
+            print(f"Failed to list workspaces in {org_id}/{project_id}: {e}")
+            return []
+
+    def get_workspace(self, org_id: str, project_id: str, workspace_id: str) -> Optional[Dict]:
+        endpoint = f"/iacm/api/orgs/{org_id}/projects/{project_id}/workspaces/{workspace_id}"
+        response = self._make_request('GET', endpoint)
+        if response.status_code == 200:
+            try:
+                return response.json()
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _strip_provider_connector_timestamps(connectors: Any) -> Any:
+        if not isinstance(connectors, list):
+            return connectors
+        return [
+            {k: v for k, v in c.items() if k not in ("created", "updated") and v is not None}
+            for c in connectors
+            if isinstance(c, dict)
+        ]
+
+    def _build_workspace_create_body(self, detail: Dict) -> Dict:
+        body = {k: v for k, v in detail.items()
+                if k in self._WORKSPACE_WRITABLE_FIELDS and v is not None}
+        if "provider_connectors" in body:
+            body["provider_connectors"] = self._strip_provider_connector_timestamps(
+                body["provider_connectors"]
+            )
+        body.setdefault("terraform_variables", {})
+        body.setdefault("environment_variables", {})
+        return body
+
+    def create_workspace(self, org_id: str, project_id: str, workspace_detail: Dict) -> str:
+        body = self._build_workspace_create_body(workspace_detail)
+        endpoint = f"/iacm/api/orgs/{org_id}/projects/{project_id}/workspaces"
+        response = self._make_request('POST', endpoint, data=body)
+        if response.status_code in (200, 201):
+            return "success"
+        if is_resource_already_exists_error(response.status_code, response.text):
+            print(f"  Workspace '{body.get('identifier', '?')}' already exists in "
+                  f"{org_id}/{project_id}. Skipping.")
+            return "skipped"
+        print(f"Failed to create workspace '{body.get('identifier', '?')}' in "
+              f"{org_id}/{project_id}: {response.status_code} - {response.text}")
+        return "failed"
+
+    def get_workspace_state(self, org_id: str, project_id: str, workspace_id: str) -> Optional[str]:
+        """Download terraform state for a workspace.
+
+        Returns state content on success, None if no state exists (404/empty),
+        or the string 'error' on transient failure (so caller can retry).
+        """
+        endpoint = f"/iacm/api/orgs/{org_id}/projects/{project_id}/workspaces/{workspace_id}/terraform-backend"
+        try:
+            response = self._make_request('GET', endpoint)
+        except Exception as e:
+            print(f"  Request error downloading state for '{workspace_id}': {e}")
+            return "error"
+        if response.status_code == 200:
+            content = response.text
+            if content and content.strip():
+                return content
+            return None
+        if response.status_code == 404:
+            return None
+        print(f"  Failed to download state for workspace '{workspace_id}' in "
+              f"{org_id}/{project_id}: {response.status_code}")
+        return "error"
+
+    def upload_workspace_state(self, org_id: str, project_id: str, workspace_id: str, state_content: str) -> str:
+        """Upload terraform state to a workspace. Returns 'success' | 'failed'."""
+        endpoint = f"/iacm/api/orgs/{org_id}/projects/{project_id}/workspaces/{workspace_id}/terraform-backend"
+        try:
+            response = self._make_request('POST', endpoint, data=state_content)
+        except Exception as e:
+            print(f"  Request error uploading state for '{workspace_id}': {e}")
+            return "failed"
+        if response.status_code in (200, 201, 204):
+            return "success"
+        print(f"  Failed to upload state for workspace '{workspace_id}' in "
+              f"{org_id}/{project_id}: {response.status_code} - {response.text[:200]}")
+        return "failed"
+
+    def list_variable_sets(self, org_id: str, project_id: str) -> List[Dict]:
+        endpoint = f"/iacm/api/orgs/{org_id}/projects/{project_id}/variable-sets"
+        try:
+            return self._fetch_iacm_paginated(endpoint)
+        except Exception as e:
+            print(f"Failed to list variable sets in {org_id}/{project_id}: {e}")
+            return []
 
 
 class HarnessMigrator:
@@ -4232,7 +4441,11 @@ class HarnessMigrator:
                 if self.dry_run:
                     spec = secret_data.get('spec', {})
                     secret_manager = spec.get('secretManagerIdentifier', 'Unknown')
-                    print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager: {secret_manager})")
+                    secret_type = secret_data.get('type', 'SecretText')
+                    if secret_type == 'SecretFile':
+                        print(f"  [DRY RUN] Would create SecretFile with placeholder file (harnessSecretManager: {secret_manager})")
+                    else:
+                        print(f"  [DRY RUN] Would create secret with value 'changeme' (harnessSecretManager: {secret_manager})")
                     results['success'] += 1
                 else:
                     result = self.dest_client.create_secret(
@@ -7010,7 +7223,21 @@ class HarnessMigrator:
         # Service accounts are migrated after roles and resource groups (service accounts reference them via role bindings)
         if 'service-accounts' in resource_types:
             all_results['service_accounts'] = self.migrate_service_accounts()
-        
+
+        # IACM resources go last — workspaces may reference modules, connectors, and pipelines.
+        # Modules first, variable-sets (list-only) next, workspaces last.
+        if 'modules' in resource_types:
+            all_results['modules'] = self.migrate_modules()
+
+        if 'variable-sets' in resource_types:
+            all_results['variable_sets'] = self.migrate_variable_sets()
+
+        if 'workspaces' in resource_types:
+            all_results['workspaces'] = self.migrate_workspaces()
+
+        if 'workspace-states' in resource_types:
+            all_results['workspace_states'] = self.migrate_workspace_states()
+
         return all_results
     
     def import_from_exports(self, import_dir: Path, resource_types: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
@@ -7128,8 +7355,236 @@ class HarnessMigrator:
                 results['failed'] += 1
             
             time.sleep(0.5)  # Rate limiting
-        
+
         self._print_skipped_summary(results, 'user')
+        return results
+
+    # ---------- IACM (modules / workspaces / variable-sets) ----------
+
+    def _module_export_filename(self, module: Dict) -> str:
+        name = module.get("name", "unknown")
+        org = module.get("org")
+        project = module.get("project")
+        if org and project:
+            return f"module_{name}_org_{org}_project_{project}.json"
+        if org:
+            return f"module_{name}_org_{org}.json"
+        return f"module_{name}_account.json"
+
+    def _module_matches_scope_filter(self, module: Dict) -> bool:
+        org = module.get("org")
+        project = module.get("project")
+        if self.org_identifier and org != self.org_identifier:
+            return False
+        if self.project_identifier and project != self.project_identifier:
+            return False
+        return True
+
+    def _write_iacm_export(self, filename: str, payload: Any) -> None:
+        path = self.export_dir / filename
+        with open(path, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+
+    @staticmethod
+    def _redact_iacm_secret_placeholders(variables: Optional[Dict],
+                                         warning_sink: List[str], section: str) -> Optional[Dict]:
+        if not isinstance(variables, dict):
+            return variables
+        replaced: Dict[str, Any] = {}
+        for key, var in variables.items():
+            if isinstance(var, dict) and var.get("value_type") == "secret":
+                value = var.get("value")
+                if value in (None, "", "***"):
+                    new_var = dict(var)
+                    new_var["value"] = "changeme"
+                    replaced[key] = new_var
+                    warning_sink.append(f"{section}.{key}")
+                    continue
+            replaced[key] = var
+        return replaced
+
+    def _prepare_workspace_for_create(self, detail: Dict) -> Tuple[Dict, List[str]]:
+        prepared = dict(detail)
+        warnings: List[str] = []
+        prepared["terraform_variables"] = self._redact_iacm_secret_placeholders(
+            prepared.get("terraform_variables"), warnings, "terraform_variables"
+        )
+        prepared["environment_variables"] = self._redact_iacm_secret_placeholders(
+            prepared.get("environment_variables"), warnings, "environment_variables"
+        )
+        return prepared, warnings
+
+    def migrate_modules(self) -> Dict[str, Any]:
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} IACM Modules ===")
+        results = self._init_results()
+        modules = self.source_client.list_modules()
+        for module in modules:
+            if not self._module_matches_scope_filter(module):
+                continue
+            name = module.get("name", "?")
+            self._write_iacm_export(self._module_export_filename(module), module)
+            scope_label = get_scope_info(module.get("org"), module.get("project"))
+            if self.dry_run:
+                print(f"  [DRY RUN] Would create module '{name}' at {scope_label}")
+                results["success"] += 1
+                continue
+            if self.dest_client is None:
+                results["failed"] += 1
+                continue
+            print(f"  Creating module '{name}' at {scope_label}...")
+            # Retry with exponential backoff for rate limiting (429)
+            status = "failed"
+            for attempt in range(4):
+                status = self.dest_client.create_module(module)
+                if status != "failed":
+                    break
+                # Check if it was a rate limit by retrying after delay
+                if attempt < 3:
+                    delay = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                    print(f"  Retrying in {delay}s (attempt {attempt + 2}/4)...")
+                    time.sleep(delay)
+            if status == "skipped":
+                self._add_skipped(results, name, scope_label)
+            else:
+                results[status] += 1
+            time.sleep(2)  # IACM API has stricter rate limits
+        return results
+
+    def migrate_variable_sets(self) -> Dict[str, Any]:
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} IACM Variable Sets ===")
+        results = self._init_results()
+        warned = False
+        for org_id, project_id in self._get_project_scopes():
+            if self.org_identifier and org_id != self.org_identifier:
+                continue
+            if self.project_identifier and project_id != self.project_identifier:
+                continue
+            sets = self.source_client.list_variable_sets(org_id, project_id)
+            for vs in sets:
+                identifier = vs.get("identifier", "unknown")
+                filename = f"variableset_{identifier}_org_{org_id}_project_{project_id}.json"
+                self._write_iacm_export(filename, vs)
+                if not warned:
+                    print("  WARNING: IACM variable-set write API returns HTTP 405; "
+                          "found variable sets will be exported but cannot be created "
+                          "in the destination. Recreate manually if needed.")
+                    warned = True
+                results["skipped"] += 1
+        return results
+
+    def migrate_workspaces(self) -> Dict[str, Any]:
+        action = "Listing" if self.dry_run else "Migrating"
+        print(f"\n=== {action} IACM Workspaces ===")
+        results = self._init_results()
+        for org_id, project_id in self._get_project_scopes():
+            if self.org_identifier and org_id != self.org_identifier:
+                continue
+            if self.project_identifier and project_id != self.project_identifier:
+                continue
+            workspaces = self.source_client.list_workspaces(org_id, project_id)
+            for ws in workspaces:
+                identifier = ws.get("identifier", "unknown")
+                detail = self.source_client.get_workspace(org_id, project_id, identifier)
+                if detail is None:
+                    print(f"  Failed to fetch detail for workspace '{identifier}' in "
+                          f"{org_id}/{project_id}")
+                    results["failed"] += 1
+                    continue
+                filename = f"workspace_{identifier}_org_{org_id}_project_{project_id}.json"
+                self._write_iacm_export(filename, detail)
+                prepared, warnings = self._prepare_workspace_for_create(detail)
+                if warnings:
+                    print(f"  WARNING: workspace '{identifier}' has redacted secret "
+                          f"variables ({', '.join(warnings)}); substituting "
+                          f"'changeme'. Update manually after migration.")
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would create workspace '{identifier}' in "
+                          f"{org_id}/{project_id}")
+                    results["success"] += 1
+                    continue
+                if self.dest_client is None:
+                    results["failed"] += 1
+                    continue
+                status = self.dest_client.create_workspace(org_id, project_id, prepared)
+                scope_label = get_scope_info(org_id, project_id)
+                if status == "skipped":
+                    self._add_skipped(results, identifier, scope_label)
+                else:
+                    results[status] += 1
+                time.sleep(0.5)
+        return results
+
+    def migrate_workspace_states(self) -> Dict[str, Any]:
+        action = "Exporting" if self.dry_run else "Migrating"
+        print(f"\n=== {action} IACM Workspace Terraform States ===")
+        results = self._init_results()
+        no_state_count = 0
+
+        for org_id, project_id in self._get_project_scopes():
+            if self.org_identifier and org_id != self.org_identifier:
+                continue
+            if self.project_identifier and project_id != self.project_identifier:
+                continue
+
+            workspaces = self.source_client.list_workspaces(org_id, project_id)
+            for ws in workspaces:
+                identifier = ws.get("identifier", "unknown")
+
+                # Download state with retry on transient errors
+                state_content = None
+                for attempt in range(4):
+                    result = self.source_client.get_workspace_state(org_id, project_id, identifier)
+                    if result != "error":
+                        state_content = result
+                        break
+                    if attempt < 3:
+                        delay = 2 ** (attempt + 1)
+                        print(f"  Retrying in {delay}s (attempt {attempt + 2}/4)...")
+                        time.sleep(delay)
+                else:
+                    results["failed"] += 1
+                    continue
+
+                if state_content is None:
+                    no_state_count += 1
+                    continue
+
+                # Export state file to disk
+                filename = f"workspace_state_{identifier}_org_{org_id}_project_{project_id}.tfstate"
+                state_path = self.export_dir / filename
+                with open(state_path, "w") as f:
+                    f.write(state_content)
+
+                if self.dry_run:
+                    print(f"  [DRY RUN] Would upload state for workspace '{identifier}' in "
+                          f"{org_id}/{project_id} ({len(state_content)} bytes)")
+                    results["success"] += 1
+                    continue
+
+                if self.dest_client is None:
+                    results["failed"] += 1
+                    continue
+
+                # Upload state with retry (same pattern as migrate_modules)
+                print(f"  Uploading state for workspace '{identifier}' in "
+                      f"{org_id}/{project_id} ({len(state_content)} bytes)...")
+                status = "failed"
+                for attempt in range(4):
+                    status = self.dest_client.upload_workspace_state(
+                        org_id, project_id, identifier, state_content)
+                    if status != "failed":
+                        break
+                    if attempt < 3:
+                        delay = 2 ** (attempt + 1)
+                        print(f"  Retrying in {delay}s (attempt {attempt + 2}/4)...")
+                        time.sleep(delay)
+                results[status] += 1
+                time.sleep(2)
+
+        if no_state_count > 0:
+            print(f"  ({no_state_count} workspace(s) had no state file)")
         return results
 
 
@@ -7139,12 +7594,12 @@ def main():
     parser.add_argument('--dest-api-key', help='Destination account API key (not required for dry-run, account ID will be extracted from key)')
     parser.add_argument('--org-identifier', help='Organization identifier (optional)')
     parser.add_argument('--project-identifier', help='Project identifier (optional)')
-    parser.add_argument('--resource-types', nargs='+', 
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
-                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+    parser.add_argument('--resource-types', nargs='+',
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts', 'modules', 'workspaces', 'variable-sets', 'workspace-states'],
+                       default=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts', 'modules', 'workspaces', 'variable-sets', 'workspace-states'],
                        help='Resource types to migrate')
     parser.add_argument('--exclude-resource-types', nargs='+',
-                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts'],
+                       choices=['organizations', 'projects', 'connectors', 'secrets', 'environments', 'infrastructures', 'services', 'overrides', 'monitored-services', 'user-journeys', 'slo-notification-rules', 'slos', 'pipelines', 'templates', 'input-sets', 'triggers', 'webhooks', 'policies', 'policy-sets', 'roles', 'resource-groups', 'settings', 'ip-allowlists', 'users', 'service-accounts', 'modules', 'workspaces', 'variable-sets', 'workspace-states'],
                        default=[],
                        help='Resource types to exclude from migration (takes precedence over --resource-types)')
     parser.add_argument('--base-url', default='https://app.harness.io/gateway',
