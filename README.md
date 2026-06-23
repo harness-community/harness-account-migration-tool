@@ -109,6 +109,24 @@ python harness_migration.py \
 
 **Note**: `--exclude-resource-types` always takes precedence. If a type is in both lists, it will be excluded.
 
+### Migrate IACM Resources
+
+**Migrate all IACM resources (modules, workspaces, variable sets, and terraform state):**
+```bash
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --dest-api-key YOUR_DEST_API_KEY \
+  --resource-types modules workspaces variable-sets workspace-states
+```
+
+**Dry-run to preview and export IACM resources:**
+```bash
+python harness_migration.py \
+  --source-api-key YOUR_SOURCE_API_KEY \
+  --dry-run \
+  --resource-types modules workspaces variable-sets workspace-states
+```
+
 ### Using a Configuration File
 
 **Migrate with proxy and custom headers:**
@@ -149,6 +167,7 @@ python harness_migration.py \
 
 ### Available Resource Types
 
+**Platform resources:**
 - `organizations` - Organizations
 - `projects` - Projects
 - `connectors` - Connectors (Git, Docker, Kubernetes, etc.)
@@ -171,6 +190,12 @@ python harness_migration.py \
 - `users` - Users with role bindings
 - `service-accounts` - Service accounts with role bindings
 
+**IACM resources:**
+- `modules` - IACM modules (account, org, and project scopes)
+- `workspaces` - IACM workspaces with terraform variables and provider connectors
+- `variable-sets` - IACM variable sets (exported only — see note below)
+- `workspace-states` - IACM workspace terraform state files
+
 ## Output
 
 The script creates a `harness_exports/` directory containing:
@@ -186,6 +211,12 @@ Files are named with the resource type, identifier, and scope:
 - **Project level**: `{resource}_{identifier}_org_{org_id}_project_{project_id}.json`
 
 For users, the email address has `@` replaced with `_at_` in the filename.
+
+IACM-specific export filenames:
+- **Modules**: `module_{identifier}_account.json` / `module_{identifier}_org_{org_id}.json` / `module_{identifier}_org_{org_id}_project_{project_id}.json`
+- **Workspaces**: `workspace_{identifier}_org_{org_id}_project_{project_id}.json`
+- **Variable sets**: `variableset_{identifier}_org_{org_id}_project_{project_id}.json`
+- **Workspace states**: `workspace_state_{identifier}_org_{org_id}_project_{project_id}.tfstate`
 
 ### Summary
 
@@ -207,12 +238,25 @@ If a resource already exists in the destination account, the migration will not 
 
 Secrets stored in `harnessSecretManager` cannot have their values migrated. The script creates them with a placeholder value of "changeme" - you must update these manually after migration.
 
+`SecretFile` type secrets using `harnessSecretManager` are created with a placeholder file upload. You must replace the placeholder file content with the actual secret file after migration.
+
 ### Migration Order
 
 Resources are automatically migrated in dependency order. For example:
 - Organizations and projects are migrated first
 - Templates are migrated before pipelines (pipelines can reference templates)
 - Input sets are migrated before triggers (triggers can reference input sets)
+- IACM resources are migrated last: modules → variable sets → workspaces → workspace states
+
+### IACM Resources
+
+**Modules** are migrated across all scopes (account, org, and project). Module creation retries up to 4 times with exponential backoff (2s → 4s → 8s) to handle IACM API rate limits.
+
+**Workspaces** are migrated per project. Workspace terraform variables and environment variables are migrated, but secret variable values are redacted by the Harness API — these are substituted with `changeme` and must be updated manually after migration. A warning is printed for each workspace that has redacted variables.
+
+**Variable sets** are exported to disk but **cannot be created via API** (the Harness IACM variable-set write API returns HTTP 405). They will be counted as skipped and must be recreated manually in the destination account using the exported JSON files.
+
+**Workspace states**: The `workspace-states` resource type downloads the terraform state file from each source workspace and uploads it to the matching workspace in the destination account. Workspaces with no existing state are silently skipped. Both download and upload operations include automatic retry with exponential backoff (up to 4 attempts) to handle transient API errors. State files are also saved to disk under `harness_exports/` as `.tfstate` files.
 
 ### Default Resources
 
@@ -301,6 +345,10 @@ timeout: 30
 - Check the migration summary for skipped resources
 - Verify the resource type is included (not excluded)
 - Ensure the resource exists in the source account at the specified scope
+
+### IACM Workspace Secret Variables
+
+Harness redacts secret variable values from workspace responses. The tool substitutes `changeme` for any redacted values and prints a warning. You must update these manually in the destination workspace after migration.
 
 ### Proxy/Network Issues
 
